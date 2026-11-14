@@ -1,6 +1,58 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
+
+const waitForWidth = (el, timeoutMs = 4000) =>
+  new Promise((resolve) => {
+    if (el.clientWidth > 8) {
+      resolve(el.clientWidth);
+      return;
+    }
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth > 8) {
+        ro.disconnect();
+        resolve(el.clientWidth);
+      }
+    });
+    ro.observe(el);
+    setTimeout(() => {
+      ro.disconnect();
+      resolve(el.clientWidth);
+    }, timeoutMs);
+  });
+
+const waitForDuration = (video, timeoutMs = 8000) =>
+  new Promise((resolve) => {
+    if (video?.duration && Number.isFinite(video.duration) && video.duration > 0) {
+      resolve(video.duration);
+      return;
+    }
+    const finish = () => {
+      const d = video?.duration;
+      resolve(Number.isFinite(d) && d > 0 ? d : 1);
+    };
+    video?.addEventListener('loadedmetadata', finish, { once: true });
+    video?.addEventListener('durationchange', finish, { once: true });
+    setTimeout(finish, timeoutMs);
+  });
+
+/** Safari/微信无法把 MP4 当音频解码，用可见占位峰保证时间轴始终能框选 */
+const buildPlaceholderPeaks = (bars = 480) => {
+  const data = new Float32Array(bars);
+  for (let i = 0; i < bars; i += 1) {
+    const t = i / bars;
+    data[i] =
+      0.18 +
+      0.55 * Math.abs(Math.sin(t * Math.PI * 22)) * (0.35 + 0.65 * Math.sin(t * Math.PI));
+  }
+  return [data];
+};
+
+const canDecodeVideoAsAudio = () => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return !/iPhone|iPad|iPod|MicroMessenger/i.test(ua);
+};
 
 export default function FreeLoopTimeline({
   videoUrl,
@@ -26,6 +78,7 @@ export default function FreeLoopTimeline({
   const wsRef = useRef(null);
   const regionsPluginRef = useRef(null);
   const syncingFromVideoRef = useRef(false);
+  const [timelineReady, setTimelineReady] = useState(0);
 
   // 使用 ref 保持最新回调，避免 WaveSurfer 闭包过期
   const callbacksRef = useRef({
@@ -57,120 +110,151 @@ export default function FreeLoopTimeline({
   useEffect(() => {
     if (!videoUrl || !containerRef.current) return;
 
-    const ws = WaveSurfer.create({
-      container: containerRef.current,
-      waveColor: '#4b5563',
-      progressColor: '#6366f1',
-      cursorColor: '#f43f5e',
-      height: 90,
-      barWidth: 2,
-      url: videoUrl,
-      // 独立解码波形，不把播放器 <video> 交给 WaveSurfer，避免抢走 playbackRate
-      interact: true,
-      dragToSeek: true,
-      autoplay: false,
-    });
-
-    const wsRegions = ws.registerPlugin(RegionsPlugin.create());
-    wsRef.current = ws;
-    regionsPluginRef.current = wsRegions;
-
-    ws.setMuted(true);
-    ws.setVolume(0);
-
-    // WaveSurfer 自带隐藏音轨，禁止它发声或自行播放，时间只跟视频走
-    ws.on('play', () => {
-      ws.pause();
-    });
-
-    ws.on('ready', () => {
-      ws.pause();
-      ws.setMuted(true);
-      wsRegions.enableDragSelection({
-        color: 'rgba(99, 102, 241, 0.3)',
-      });
-      const video = videoRef?.current;
-      if (video && !Number.isNaN(video.currentTime)) {
-        syncingFromVideoRef.current = true;
-        ws.setTime(video.currentTime);
-        syncingFromVideoRef.current = false;
-      }
-    });
-
-    ws.on('interaction', (newTime) => {
-      if (syncingFromVideoRef.current) return;
-      callbacksRef.current.onSeek?.(newTime);
-    });
-
+    const container = containerRef.current;
+    let cancelled = false;
     let rafId = 0;
     let syncCancelled = false;
-    const syncPlayhead = () => {
-      if (syncCancelled) return;
-      const video = videoRef?.current;
-      if (video && ws.getDuration()) {
-        const videoTime = video.currentTime || 0;
-        if (Math.abs(ws.getCurrentTime() - videoTime) > 0.03) {
+    let resizeObserver = null;
+    let ws = null;
+
+    const boot = async () => {
+      await waitForWidth(container);
+      const duration = await waitForDuration(videoRef?.current);
+      if (cancelled || !container.isConnected) return;
+
+      ws = WaveSurfer.create({
+        container,
+        waveColor: '#9ca3af',
+        progressColor: '#818cf8',
+        cursorColor: '#f43f5e',
+        height: 90,
+        barWidth: 2,
+        barGap: 1,
+        barRadius: 1,
+        normalize: true,
+        // 不传 url：手机端解码 MP4 会失败导致整条轴空白
+        peaks: buildPlaceholderPeaks(),
+        duration,
+        interact: true,
+        dragToSeek: true,
+        autoplay: false,
+        fillParent: true,
+      });
+
+      const wsRegions = ws.registerPlugin(RegionsPlugin.create());
+      wsRef.current = ws;
+      regionsPluginRef.current = wsRegions;
+
+      ws.setMuted(true);
+      ws.setVolume(0);
+      ws.on('play', () => ws.pause());
+
+      ws.on('ready', () => {
+        if (cancelled) return;
+        ws.pause();
+        ws.setMuted(true);
+        wsRegions.enableDragSelection({
+          color: 'rgba(99, 102, 241, 0.3)',
+        });
+        const video = videoRef?.current;
+        if (video && !Number.isNaN(video.currentTime)) {
           syncingFromVideoRef.current = true;
-          ws.setTime(videoTime);
+          ws.setTime(video.currentTime);
           syncingFromVideoRef.current = false;
         }
-      }
-      rafId = requestAnimationFrame(syncPlayhead);
-    };
-    rafId = requestAnimationFrame(syncPlayhead);
+        setTimelineReady((n) => n + 1);
+      });
 
-    // 在波形上直接框选创建新区间（根据当前所在的 Feature Tab 创建循环段或镜面区间）
-    wsRegions.on('region-created', (newRegion) => {
-      if (newRegion.id.startsWith('seg-') || newRegion.id.startsWith('mir-')) return;
-      const start = Number(newRegion.start.toFixed(2));
-      const end = Number(newRegion.end.toFixed(2));
-      newRegion.remove();
+      ws.on('interaction', (newTime) => {
+        if (syncingFromVideoRef.current) return;
+        callbacksRef.current.onSeek?.(newTime);
+      });
 
-      if (end - start > 0.25) {
-        if (callbacksRef.current.editTarget === 'mirror') {
-          callbacksRef.current.onAddMirrorZone(start, end);
-        } else {
-          callbacksRef.current.onAddSegment(start, end);
+      const syncPlayhead = () => {
+        if (syncCancelled || !ws) return;
+        const video = videoRef?.current;
+        if (video && ws.getDuration()) {
+          const videoTime = video.currentTime || 0;
+          if (Math.abs(ws.getCurrentTime() - videoTime) > 0.03) {
+            syncingFromVideoRef.current = true;
+            ws.setTime(videoTime);
+            syncingFromVideoRef.current = false;
+          }
         }
-        callbacksRef.current.onPreviewFrame?.(start, `${start.toFixed(2)}s`);
-      }
-    });
+        rafId = requestAnimationFrame(syncPlayhead);
+      };
+      rafId = requestAnimationFrame(syncPlayhead);
 
-    // 拖动选区边缘时，实时更新时间并让视频画面跳转到被拖动的边缘帧进行预览
-    wsRegions.on('region-updated', (region, side) => {
-      const start = Number(region.start.toFixed(2));
-      const end = Number(region.end.toFixed(2));
-      const previewTime = side === 'end' ? end : start;
+      resizeObserver = new ResizeObserver(() => {
+        if (!ws || cancelled) return;
+        const width = container.clientWidth;
+        if (width > 8) ws.setOptions({ width });
+      });
+      resizeObserver.observe(container);
 
-      if (region.id.startsWith('seg-')) {
-        callbacksRef.current.onUpdateSegment(region.id, { start, end });
-        callbacksRef.current.onPreviewFrame?.(
-          previewTime,
-          `${side === 'end' ? 'End' : 'Start'} ${previewTime.toFixed(2)}s`
-        );
-      } else if (region.id.startsWith('mir-')) {
-        callbacksRef.current.onUpdateMirrorZone(region.id, { start, end });
-        callbacksRef.current.onPreviewFrame?.(
-          previewTime,
-          `Mirror ${side === 'end' ? 'End' : 'Start'} ${previewTime.toFixed(2)}s`
-        );
-      }
-    });
+      wsRegions.on('region-created', (newRegion) => {
+        if (newRegion.id.startsWith('seg-') || newRegion.id.startsWith('mir-')) return;
+        const regionStart = Number(newRegion.start.toFixed(2));
+        const regionEnd = Number(newRegion.end.toFixed(2));
+        newRegion.remove();
 
-    // 点击选区时选中它，并预览起始画面
-    wsRegions.on('region-clicked', (region, e) => {
-      e.stopPropagation();
-      if (region.id.startsWith('seg-')) {
-        callbacksRef.current.onSelectSegment(region.id);
-      } else if (region.id.startsWith('mir-')) {
-        callbacksRef.current.onSelectMirrorZone(region.id);
+        if (regionEnd - regionStart > 0.25) {
+          if (callbacksRef.current.editTarget === 'mirror') {
+            callbacksRef.current.onAddMirrorZone(regionStart, regionEnd);
+          } else {
+            callbacksRef.current.onAddSegment(regionStart, regionEnd);
+          }
+          callbacksRef.current.onPreviewFrame?.(regionStart, `${regionStart.toFixed(2)}s`);
+        }
+      });
+
+      wsRegions.on('region-updated', (region, side) => {
+        const regionStart = Number(region.start.toFixed(2));
+        const regionEnd = Number(region.end.toFixed(2));
+        const previewTime = side === 'end' ? regionEnd : regionStart;
+
+        if (region.id.startsWith('seg-')) {
+          callbacksRef.current.onUpdateSegment(region.id, { start: regionStart, end: regionEnd });
+          callbacksRef.current.onPreviewFrame?.(
+            previewTime,
+            `${side === 'end' ? 'End' : 'Start'} ${previewTime.toFixed(2)}s`
+          );
+        } else if (region.id.startsWith('mir-')) {
+          callbacksRef.current.onUpdateMirrorZone(region.id, { start: regionStart, end: regionEnd });
+          callbacksRef.current.onPreviewFrame?.(
+            previewTime,
+            `Mirror ${side === 'end' ? 'End' : 'Start'} ${previewTime.toFixed(2)}s`
+          );
+        }
+      });
+
+      wsRegions.on('region-clicked', (region, e) => {
+        e.stopPropagation();
+        if (region.id.startsWith('seg-')) {
+          callbacksRef.current.onSelectSegment(region.id);
+        } else if (region.id.startsWith('mir-')) {
+          callbacksRef.current.onSelectMirrorZone(region.id);
+        }
+      });
+
+      if (canDecodeVideoAsAudio()) {
+        ws.load(videoUrl).catch(() => {
+          if (cancelled) return;
+          ws.setOptions({ peaks: buildPlaceholderPeaks(), duration });
+        });
       }
-    });
+    };
+
+    boot();
 
     return () => {
+      cancelled = true;
       syncCancelled = true;
       cancelAnimationFrame(rafId);
-      ws.destroy();
+      resizeObserver?.disconnect();
+      ws?.destroy();
+      wsRef.current = null;
+      regionsPluginRef.current = null;
     };
   }, [videoUrl, videoRef]);
 
@@ -211,7 +295,7 @@ export default function FreeLoopTimeline({
         });
       });
     }
-  }, [editTarget, segments, mirrorZones, activeSegmentId, activeMirrorId, syncLoopRate, globalRate, t]);
+  }, [editTarget, segments, mirrorZones, activeSegmentId, activeMirrorId, syncLoopRate, globalRate, t, timelineReady]);
 
   return (
     <div className="w-full bg-gray-900 p-4 rounded-xl border border-gray-800">
@@ -225,7 +309,11 @@ export default function FreeLoopTimeline({
             : t.timelineTotalLoop(segments.length)}
         </span>
       </div>
-      <div ref={containerRef} dir="ltr" className="w-full" />
+      <div
+        ref={containerRef}
+        dir="ltr"
+        className="w-full min-h-[90px] rounded-lg bg-gray-800 overflow-hidden touch-none"
+      />
     </div>
   );
 }
