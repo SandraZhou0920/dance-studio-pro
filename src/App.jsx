@@ -39,9 +39,9 @@ export default function App() {
     loadAllProjects();
   }, []);
 
-  const handleCreateProject = async (e, theme) => {
-    const files = pickVideoFiles(e.target.files);
-    e.target.value = '';
+  const handleCreateProject = async (fileList, theme, resetValue) => {
+    const files = await pickVideoFiles(fileList);
+    resetValue?.();
     if (files.length === 0) {
       window.alert(t.noVideoFilesSelected);
       return;

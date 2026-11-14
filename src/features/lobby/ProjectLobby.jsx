@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { isEditorReady } from '../editor';
 import VideoFileButton from '../../components/shared/VideoFileButton';
 
@@ -14,6 +15,13 @@ export default function ProjectLobby({
   onDeleteProject,
 }) {
   const displayedProjects = activeTheme === 'dance' ? danceProjects : editProjects;
+  const [dropActive, setDropActive] = useState(false);
+
+  const onDropVideos = (e) => {
+    e.preventDefault();
+    setDropActive(false);
+    onCreateProject(e.dataTransfer.files, activeTheme);
+  };
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-8 flex flex-col items-center">
@@ -76,7 +84,25 @@ export default function ProjectLobby({
           </button>
         </div>
 
-        <div className="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 space-y-5">
+        <div
+          onDragEnter={(e) => {
+            e.preventDefault();
+            setDropActive(true);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            setDropActive(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget)) return;
+            setDropActive(false);
+          }}
+          onDrop={onDropVideos}
+          className={`bg-gray-900/80 border rounded-2xl p-6 space-y-5 transition ${
+            dropActive ? 'border-indigo-400 bg-indigo-950/30' : 'border-gray-800'
+          }`}
+        >
           <div className="flex flex-wrap justify-between items-center gap-4 border-b border-gray-800 pb-4">
             <div>
               <h3 className="text-lg font-semibold">
@@ -86,7 +112,11 @@ export default function ProjectLobby({
             </div>
             <VideoFileButton
               id="lobby-video-files"
-              onChange={(e) => onCreateProject(e, activeTheme)}
+              onChange={(e) =>
+                onCreateProject(e.target.files, activeTheme, () => {
+                  e.target.value = '';
+                })
+              }
               className={`px-4 py-2.5 rounded-xl text-sm font-medium cursor-pointer transition ${
                 activeTheme === 'dance'
                   ? 'bg-indigo-600 hover:bg-indigo-500 text-white'

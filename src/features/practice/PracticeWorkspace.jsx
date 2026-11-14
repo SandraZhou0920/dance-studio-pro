@@ -131,9 +131,9 @@ export default function PracticeWorkspace({
     }));
   };
 
-  const handleAddVideos = async (e) => {
-    const files = pickVideoFiles(e.target.files);
-    e.target.value = '';
+  const ingestVideoFiles = async (fileList, resetValue) => {
+    const files = await pickVideoFiles(fileList);
+    resetValue?.();
     if (files.length === 0) {
       window.alert(t.noVideoFilesSelected);
       return;
@@ -184,7 +184,18 @@ export default function PracticeWorkspace({
   });
 
   return (
-    <div dir="ltr" className="min-h-screen bg-gray-950 text-white p-5 flex flex-col gap-4">
+    <div
+      dir="ltr"
+      className="min-h-screen bg-gray-950 text-white p-5 flex flex-col gap-4"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        ingestVideoFiles(e.dataTransfer.files);
+      }}
+    >
       <header className="flex flex-wrap justify-between items-center border-b border-gray-800 pb-3 gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -227,7 +238,11 @@ export default function PracticeWorkspace({
           </button>
           <VideoFileButton
             id="workspace-video-files"
-            onChange={handleAddVideos}
+            onChange={(e) =>
+              ingestVideoFiles(e.target.files, () => {
+                e.target.value = '';
+              })
+            }
             className="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg cursor-pointer text-xs font-medium"
           >
             {t.addVideosToProject}
