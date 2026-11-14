@@ -16,6 +16,7 @@ export const translations = {
       emptyProjects: '当前主题下暂无缓存项目，点击右上角按钮创建你的第一个项目',
       deleteBtn: '删除',
       confirmDeleteProject: (title) => `确定删除项目「${title}」？本地缓存的视频将一并删除，且无法恢复。`,
+      saveProjectFail: '视频未能写入本地缓存。请换 Chrome / Safari 再试；若文件很大，可能是浏览器存储空间不足。',
       emptySegments:
         '当前暂无循环段落。你可以在上方波形图拖动鼠标框选，或点击「+ 在当前秒数添加循环段」。没有循环段时，四种播放模式都会按基准速度通跳。',
       emptyMirrorZones:
@@ -96,6 +97,8 @@ export const translations = {
       deleteBtn: 'Delete',
       confirmDeleteProject: (title) =>
         `Delete project "${title}"? Cached videos will be removed and cannot be undone.`,
+      saveProjectFail:
+        'Could not save the video locally. Try Chrome or Safari; a very large file may exceed browser storage.',
       emptySegments:
         'No loop segments yet. Drag on the waveform above or click "+ Add Loop Segment Here". With no segments, all play modes play the full track at base speed.',
       emptyMirrorZones:

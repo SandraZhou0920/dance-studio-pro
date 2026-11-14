@@ -133,15 +133,20 @@ export default function PracticeWorkspace({
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     if (files.length === 0) return;
-    const newEntries = files.map((file, idx) => createPracticeVideoEntry(file, idx));
-    const nextIndex = project.videos.length;
-    const saved = await saveProject({
-      ...project,
-      videos: [...project.videos, ...newEntries],
-      activeVideoIndex: nextIndex,
-    });
-    setProject(saved);
-    setActiveVideoIndex(nextIndex);
+    try {
+      const newEntries = files.map((file, idx) => createPracticeVideoEntry(file, idx));
+      const nextIndex = project.videos.length;
+      const saved = await saveProject({
+        ...project,
+        videos: [...project.videos, ...newEntries],
+        activeVideoIndex: nextIndex,
+      });
+      setProject(saved);
+      setActiveVideoIndex(nextIndex);
+    } catch (err) {
+      console.error(err);
+      window.alert(t.saveProjectFail);
+    }
   };
 
   const handleRemoveVideo = async (e, idxToRemove) => {
@@ -215,9 +220,19 @@ export default function PracticeWorkspace({
           >
             {lang === 'zh' ? 'English' : '中文'}
           </button>
-          <label className="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg cursor-pointer text-xs font-medium">
+          <label
+            htmlFor="workspace-video-files"
+            className="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg cursor-pointer text-xs font-medium"
+          >
             {t.addVideosToProject}
-            <input type="file" accept="video/*" multiple onChange={handleAddVideos} className="hidden" />
+            <input
+              id="workspace-video-files"
+              type="file"
+              accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.m4v,video/*"
+              multiple
+              onChange={handleAddVideos}
+              className="sr-only"
+            />
           </label>
         </div>
       </header>

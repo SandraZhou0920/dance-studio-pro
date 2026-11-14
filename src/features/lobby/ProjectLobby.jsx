@@ -84,6 +84,7 @@ export default function ProjectLobby({
               <p className="text-xs text-gray-400 mt-0.5">{t.multiSelectHint}</p>
             </div>
             <label
+              htmlFor="lobby-video-files"
               className={`px-4 py-2.5 rounded-xl text-sm font-medium cursor-pointer transition ${
                 activeTheme === 'dance'
                   ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
@@ -92,11 +93,12 @@ export default function ProjectLobby({
             >
               {activeTheme === 'dance' ? t.newDanceProject : t.newEditProject}
               <input
+                id="lobby-video-files"
                 type="file"
-                accept="video/*"
+                accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.m4v,video/*"
                 multiple
                 onChange={(e) => onCreateProject(e, activeTheme)}
-                className="hidden"
+                className="sr-only"
               />
             </label>
           </div>
@@ -109,7 +111,7 @@ export default function ProjectLobby({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {displayedProjects.map((proj) => {
                 const totalSizeMB =
-                  proj.videos.reduce((acc, v) => acc + v.file.size, 0) / (1024 * 1024);
+                  proj.videos.reduce((acc, v) => acc + (v.file?.size || 0), 0) / (1024 * 1024);
                 return (
                   <div
                     key={proj.id}

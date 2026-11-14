@@ -57,11 +57,15 @@ export default function App() {
       activeFeatureTab: 'loop',
     };
 
-    const saved = await saveProject(newProject);
-    await loadAllProjects();
-
-    if (theme === 'dance') {
-      setCurrentProject(saved);
+    try {
+      const saved = await saveProject(newProject);
+      await loadAllProjects();
+      if (theme === 'dance') {
+        setCurrentProject(saved);
+      }
+    } catch (err) {
+      console.error(err);
+      window.alert(t.saveProjectFail);
     }
   };
 
