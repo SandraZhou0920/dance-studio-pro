@@ -1,0 +1,50 @@
+# Dance Studio Pro — AI Agent Architecture & Engineering Guidelines
+
+You are maintaining and extending **Dance Studio Pro**, a client-side choreography practice and video analysis web application built with **React + Vite + Tailwind CSS + WaveSurfer.js + IndexedDB**.
+
+## 1. Core Architectural Principles (DO NOT VIOLATE)
+1. **Strict Left-to-Right Timeline Invariance (`dir="ltr"`)**:
+   - Mirror flipping (`scaleX(-1)`) MUST ONLY be applied to the inner video wrapper inside `DancePlayer.jsx`.
+   - Native or custom video progress bars, scrubbers, and the `WaveSurfer` waveform timeline MUST ALWAYS remain left-to-right (`dir="ltr"`). Never mirror containers holding playback controls.
+2. **Decoupled Feature Domains**:
+   - **Loop Segments (`segments`)** and **Mirror Zones (`mirrorZones`)** are completely independent data structures per video asset. They can overlap arbitrarily in time.
+   - UI editing is separated into two distinct tabs (`activeFeatureTab`: `'loop' | 'mirror'`), which controls what `FreeLoopTimeline` renders and creates on drag-selection.
+3. **100% Local-First Persistence**:
+   - All video `File`/`Blob` objects and JSON metadata are stored locally in browser IndexedDB via `src/utils/projectCache.js`. Never introduce mandatory cloud uploads or external backend dependencies unless explicitly requested.
+4. **60fps Render Isolation**:
+   - High-frequency `requestAnimationFrame` time polling for progress bar UI is isolated inside `ProgressBarFooter` (in `DancePlayer.jsx`) to prevent re-rendering the `<video>` transform layers 60 times per second.
+
+## 2. File Structure & Responsibilities
+- `src/App.jsx`:
+  - Main state container managing Lobby View (`!currentProject`) and Workspace View (`currentProject`).
+  - Handles multi-video project CRUD, keyboard shortcuts (`Space`, `A`, `B`, `[`, `]`), frame-seek preview (`triggerFramePreview`), and feature tab switching (`loop` vs `mirror`).
+- `src/components/DancePlayer.jsx`:
+  - Renders the video canvas with two nested GPU-accelerated transform layers (`will-change-transform`): outer layer for fast wheel zoom (`scale`), inner layer for smooth 320ms `cubic-bezier(0.22, 1, 0.36, 1)` horizontal flip (`scaleX`).
+  - Runs the core playback state machine (`single`, `highlights` [sequential/merged], `practice`, `off`), `loopFullTrack`, and real-time `mirrorStrategy` evaluation (`auto` | `forceOn` | `forceOff`).
+  - Contains `ProgressBarFooter` showing exact original video timestamps (`0.01s` precision) and visual overlay markers for `segments` and `mirrorZones`.
+- `src/components/FreeLoopTimeline.jsx`:
+  - Wraps `wavesurfer.js` + `RegionsPlugin`.
+  - Switches interactive regions dynamically based on `editTarget` (`'loop'` renders `seg-*` regions; `'mirror'` renders `mir-*` regions).
+  - Emits `onPreviewFrame` when dragging region edges (`region-updated`) so the user sees exact video frames while trimming.
+- `src/utils/projectCache.js`:
+  - IndexedDB wrapper persisting projects under `'dance'` and `'edit'` themes.
+- `src/utils/i18n.js`:
+  - Bilingual dictionary (`zh` / `en`). **IMPORTANT**: Preserve the user's exact customized Chinese (`zh`) terminology (e.g., `段落 1`, `多段落循环`, `正 / 镜面区间设置`).
+
+## 3. Data Schema (Per Video Entry inside `project.videos[]`)
+```js
+{
+  id: string,
+  name: string,
+  file: File, // Stored as Blob in IndexedDB
+  segments: [
+    { id: string, name: string, start: number, end: number, targetLoops: number, playbackRate: number }
+  ],
+  mirrorZones: [
+    { id: string, name: string, start: number, end: number, isMirrored: boolean }
+  ],
+  mirrorStrategy: 'auto' | 'forceOn' | 'forceOff',
+  globalRate: number,      // 0.25 - 1.50
+  syncLoopRate: boolean,   // true = override segment playbackRate with globalRate
+  loopFullTrack: boolean
+}
