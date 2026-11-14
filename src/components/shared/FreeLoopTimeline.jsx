@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
+import ZoomPlugin from 'wavesurfer.js/dist/plugins/zoom.esm.js';
+import HoverPlugin from 'wavesurfer.js/dist/plugins/hover.esm.js';
+import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
+
+const MIN_PX_PER_SEC = 8;
+const MAX_PX_PER_SEC = 800;
+const ZOOM_STEP = 1.35;
 
 const waitForWidth = (el, timeoutMs = 4000) =>
   new Promise((resolve) => {
@@ -54,6 +61,36 @@ const canDecodeVideoAsAudio = () => {
   return !/iPhone|iPad|iPod|MicroMessenger/i.test(ua);
 };
 
+const formatPtr = (sec) => {
+  if (!Number.isFinite(sec) || sec < 0) return '0.00s';
+  const m = Math.floor(sec / 60);
+  const s = (sec % 60).toFixed(2).padStart(5, '0');
+  return m > 0 ? `${m}:${s}` : `${sec.toFixed(2)}s`;
+};
+
+const scrollParentOf = (ws) => ws?.getWrapper()?.parentElement;
+
+const pxPerSecOf = (ws) => {
+  const duration = ws?.getDuration() || 0;
+  const wrap = ws?.getWrapper();
+  if (!duration || !wrap) return MIN_PX_PER_SEC;
+  return wrap.scrollWidth / duration;
+};
+
+const fitPxPerSec = (ws) => {
+  const duration = ws?.getDuration() || 1;
+  const width = scrollParentOf(ws)?.clientWidth || 1;
+  return Math.max(MIN_PX_PER_SEC, width / duration);
+};
+
+const timeToViewX = (ws, time) => {
+  const wrap = ws?.getWrapper();
+  const scroll = scrollParentOf(ws);
+  const duration = ws?.getDuration() || 1;
+  if (!wrap || !scroll) return 0;
+  return (time / duration) * wrap.scrollWidth - scroll.scrollLeft;
+};
+
 export default function FreeLoopTimeline({
   videoUrl,
   videoRef,            // 与播放器共用同一时间轴，仅同步光标，不接管 <video>
@@ -79,6 +116,8 @@ export default function FreeLoopTimeline({
   const regionsPluginRef = useRef(null);
   const syncingFromVideoRef = useRef(false);
   const [timelineReady, setTimelineReady] = useState(0);
+  const [playheadPtr, setPlayheadPtr] = useState(null);
+  const [zoomLabel, setZoomLabel] = useState('1.0x');
 
   // 使用 ref 保持最新回调，避免 WaveSurfer 闭包过期
   const callbacksRef = useRef({
@@ -135,11 +174,15 @@ export default function FreeLoopTimeline({
         waveColor: '#9ca3af',
         progressColor: '#818cf8',
         cursorColor: '#f43f5e',
-        height: 90,
+        height: 96,
         barWidth: 2,
         barGap: 1,
         barRadius: 1,
         normalize: true,
+        cursorWidth: 2,
+        autoScroll: true,
+        autoCenter: false,
+        hideScrollbar: false,
         // 不传 url：手机端解码 MP4 会失败导致整条轴空白
         peaks: buildPlaceholderPeaks(),
         duration,
@@ -150,6 +193,36 @@ export default function FreeLoopTimeline({
       });
 
       const wsRegions = ws.registerPlugin(RegionsPlugin.create());
+      ws.registerPlugin(
+        ZoomPlugin.create({
+          exponentialZooming: true,
+          iterations: 18,
+          maxZoom: MAX_PX_PER_SEC,
+          scale: 0.35,
+        })
+      );
+      ws.registerPlugin(
+        HoverPlugin.create({
+          lineColor: '#fbbf24',
+          lineWidth: 1,
+          labelBackground: '#111827',
+          labelColor: '#fde68a',
+          labelSize: 11,
+          formatTimeCallback: (seconds) => formatPtr(seconds),
+        })
+      );
+      ws.registerPlugin(
+        TimelinePlugin.create({
+          height: 16,
+          insertPosition: 'beforebegin',
+          primaryLabelInterval: 5,
+          timeInterval: 1,
+          style: {
+            fontSize: '10px',
+            color: '#9ca3af',
+          },
+        })
+      );
       wsRef.current = ws;
       regionsPluginRef.current = wsRegions;
 
@@ -189,6 +262,14 @@ export default function FreeLoopTimeline({
         callbacksRef.current.onSeek?.(newTime);
       });
 
+      const refreshZoomLabel = () => {
+        const fit = fitPxPerSec(ws);
+        const cur = pxPerSecOf(ws);
+        setZoomLabel(`${Math.max(0.5, cur / fit).toFixed(1)}x`);
+      };
+      ws.on('zoom', refreshZoomLabel);
+      ws.on('ready', refreshZoomLabel);
+
       videoEl?.addEventListener('loadedmetadata', applyVideoDuration);
       videoEl?.addEventListener('durationchange', applyVideoDuration);
       applyVideoDuration();
@@ -203,6 +284,13 @@ export default function FreeLoopTimeline({
             ws.setTime(videoTime);
             syncingFromVideoRef.current = false;
           }
+          const x = timeToViewX(ws, videoTime);
+          setPlayheadPtr((prev) => {
+            if (prev && Math.abs(prev.x - x) < 1 && Math.abs(prev.time - videoTime) < 0.03) {
+              return prev;
+            }
+            return { x, time: videoTime };
+          });
         }
         rafId = requestAnimationFrame(syncPlayhead);
       };
@@ -322,23 +410,84 @@ export default function FreeLoopTimeline({
     }
   }, [editTarget, segments, mirrorZones, activeSegmentId, activeMirrorId, syncLoopRate, globalRate, t, timelineReady]);
 
+  const applyZoom = (nextPx) => {
+    const ws = wsRef.current;
+    if (!ws?.getDuration()) return;
+    const duration = ws.getDuration();
+    const scroll = scrollParentOf(ws);
+    const fit = fitPxPerSec(ws);
+    const clamped = Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, nextPx));
+    const usePx = nextPx <= fit + 0.5 ? fit : clamped;
+    const centerTime = videoRef?.current?.currentTime || 0;
+    if (usePx <= fit + 0.5) {
+      ws.zoom(fit);
+      if (scroll) scroll.scrollLeft = 0;
+      return;
+    }
+    ws.zoom(usePx);
+    if (scroll) {
+      const x = (centerTime / duration) * (ws.getWrapper()?.scrollWidth || 0);
+      scroll.scrollLeft = Math.max(0, x - scroll.clientWidth / 2);
+    }
+  };
+
   return (
     <div className="w-full bg-gray-900 p-4 rounded-xl border border-gray-800">
-      <div className="flex justify-between items-center text-xs text-gray-400 mb-2">
+      <div className="flex flex-wrap justify-between items-center gap-2 text-xs text-gray-400 mb-2">
         <span>
           {editTarget === 'mirror' ? t.timelineHintMirror : t.timelineHintLoop}
         </span>
-        <span className={editTarget === 'mirror' ? 'text-cyan-400' : 'text-indigo-400'}>
-          {editTarget === 'mirror'
-            ? t.timelineTotalMirror((mirrorZones || []).length)
-            : t.timelineTotalLoop(segments.length)}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-500 hidden sm:inline">{t.timelineZoomHint}</span>
+          <button
+            type="button"
+            onClick={() => applyZoom(pxPerSecOf(wsRef.current) / ZOOM_STEP)}
+            className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 cursor-pointer"
+          >
+            − {t.timelineZoomOut}
+          </button>
+          <span className="font-mono text-amber-300 w-10 text-center">{zoomLabel}</span>
+          <button
+            type="button"
+            onClick={() => applyZoom(pxPerSecOf(wsRef.current) * ZOOM_STEP)}
+            className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 cursor-pointer"
+          >
+            + {t.timelineZoomIn}
+          </button>
+          <button
+            type="button"
+            onClick={() => applyZoom(fitPxPerSec(wsRef.current))}
+            className="px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 cursor-pointer"
+          >
+            {t.timelineZoomFit}
+          </button>
+          <span className={editTarget === 'mirror' ? 'text-cyan-400' : 'text-indigo-400'}>
+            {editTarget === 'mirror'
+              ? t.timelineTotalMirror((mirrorZones || []).length)
+              : t.timelineTotalLoop(segments.length)}
+          </span>
+        </div>
       </div>
-      <div
-        ref={containerRef}
-        dir="ltr"
-        className="w-full min-h-[90px] rounded-lg bg-gray-800 overflow-hidden touch-none"
-      />
+      <div className="relative">
+        <div
+          ref={containerRef}
+          dir="ltr"
+          className="w-full min-h-[96px] rounded-lg bg-gray-800 overflow-x-auto overflow-y-hidden touch-none"
+        />
+        {playheadPtr &&
+          playheadPtr.x >= -4 &&
+          playheadPtr.x <= (containerRef.current?.clientWidth || 0) + 4 && (
+          <div
+            className="pointer-events-none absolute top-4 bottom-0 z-20"
+            style={{ left: playheadPtr.x }}
+          >
+            <div className="w-0.5 h-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]" />
+            <div className="absolute top-1 left-1.5 px-1.5 py-0.5 rounded bg-rose-600 text-[10px] font-mono text-white whitespace-nowrap">
+              {t.timelinePlayhead} {formatPtr(playheadPtr.time)}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
