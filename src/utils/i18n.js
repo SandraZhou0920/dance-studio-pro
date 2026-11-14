@@ -18,6 +18,8 @@ export const translations = {
       confirmDeleteProject: (title) => `确定删除项目「${title}」？本地缓存的视频将一并删除，且无法恢复。`,
       emptySegments:
         '当前暂无循环段落。你可以在上方波形图拖动鼠标框选，或点击「+ 在当前秒数添加循环段」。没有循环段时，四种播放模式都会按基准速度通跳。',
+      emptyMirrorZones:
+        '当前暂无自定义镜面区间。你可以在上方波形图直接拖动鼠标框选，或点击右上角「+ 在当前秒数添加翻转区间」',
       moveSegUp: '上移',
       moveSegDown: '下移',
       videoCountAndSize: (count, mb) => `共 ${count} 个视频 · ${mb} MB`,
@@ -95,6 +97,8 @@ export const translations = {
         `Delete project "${title}"? Cached videos will be removed and cannot be undone.`,
       emptySegments:
         'No loop segments yet. Drag on the waveform above or click "+ Add Loop Segment Here". With no segments, all play modes play the full track at base speed.',
+      emptyMirrorZones:
+        'No mirror zones configured yet. Drag directly on the waveform above or click "+ Add Mirror Zone Here".',
       moveSegUp: 'Move up',
       moveSegDown: 'Move down',
       videoCountAndSize: (count, mb) => `${count} Videos · ${mb} MB`,

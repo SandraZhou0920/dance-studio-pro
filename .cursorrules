@@ -9,29 +9,30 @@ You are maintaining and extending **Dance Studio Pro**, a client-side choreograp
 2. **Decoupled Feature Domains**:
    - **Loop Segments (`segments`)** and **Mirror Zones (`mirrorZones`)** are completely independent data structures per video asset. They can overlap arbitrarily in time.
    - UI editing is separated into two distinct tabs (`activeFeatureTab`: `'loop' | 'mirror'`), which controls what `FreeLoopTimeline` renders and creates on drag-selection.
+   - New product surfaces (editor, metronome, pose compare) live in their own `src/features/<name>/` folder. Do not dump their UI or state into `App.jsx` or `features/practice/`.
 3. **100% Local-First Persistence**:
    - All video `File`/`Blob` objects and JSON metadata are stored locally in browser IndexedDB via `src/utils/projectCache.js`. Never introduce mandatory cloud uploads or external backend dependencies unless explicitly requested.
 4. **60fps Render Isolation**:
    - High-frequency `requestAnimationFrame` time polling for progress bar UI is isolated inside `ProgressBarFooter` (in `DancePlayer.jsx`) to prevent re-rendering the `<video>` transform layers 60 times per second.
 
 ## 2. File Structure & Responsibilities
-- `src/App.jsx`:
-  - Main state container managing Lobby View (`!currentProject`) and Workspace View (`currentProject`).
-  - Handles multi-video project CRUD, keyboard shortcuts (`Space`, `A`, `B`, `[`, `]`), frame-seek preview (`triggerFramePreview`), and feature tab switching (`loop` vs `mirror`).
-- `src/components/DancePlayer.jsx`:
-  - Renders the video canvas with two nested GPU-accelerated transform layers (`will-change-transform`): outer layer for fast wheel zoom (`scale`), inner layer for smooth 320ms `cubic-bezier(0.22, 1, 0.36, 1)` horizontal flip (`scaleX`).
-  - Runs the core playback state machine (`single`, `highlights` [sequential/merged], `practice`, `off`), `loopFullTrack`, and real-time `mirrorStrategy` evaluation (`auto` | `forceOn` | `forceOff`).
-  - Contains `ProgressBarFooter` showing exact original video timestamps (`0.01s` precision) and visual overlay markers for `segments` and `mirrorZones`.
-- `src/components/FreeLoopTimeline.jsx`:
-  - Wraps `wavesurfer.js` + `RegionsPlugin`.
-  - Switches interactive regions dynamically based on `editTarget` (`'loop'` renders `seg-*` regions; `'mirror'` renders `mir-*` regions).
-  - Emits `onPreviewFrame` when dragging region edges (`region-updated`) so the user sees exact video frames while trimming.
-- `src/utils/projectCache.js`:
-  - IndexedDB wrapper persisting projects under `'dance'` and `'edit'` themes.
-- `src/utils/i18n.js`:
-  - Bilingual dictionary (`zh` / `en`). **IMPORTANT**: Preserve the user's exact customized Chinese (`zh`) terminology (e.g., `段落 1`, `多段落循环`, `正 / 镜面区间设置`).
+- `src/App.jsx`: Shell only — language, IndexedDB project lists, lobby vs workspace routing. No playback state machines.
+- `src/features/lobby/ProjectLobby.jsx`: Dual-theme project hall.
+- `src/features/practice/`: Choreography practice workspace only.
+  - `PracticeWorkspace.jsx`: Practice session state, video object URLs, persistence helpers.
+  - `LoopControlPanel.jsx` / `MirrorControlPanel.jsx`: Feature-tab UIs.
+  - `usePracticeShortcuts.js`: Space / A / B / speed keys.
+  - `createPracticeVideo.js`: Default per-video practice schema.
+- `src/features/editor/`: Dance video editor (not ready). Keep isolated; toggle via `isEditorReady`.
+- `src/components/shared/DancePlayer.jsx`: Nested GPU transform layers (zoom outer, `scaleX` inner), playback modes, `ProgressBarFooter`.
+- `src/components/shared/FreeLoopTimeline.jsx`: WaveSurfer regions; `editTarget` `'loop' | 'mirror'`; playhead synced to the player.
+- `src/utils/projectCache.js`: IndexedDB wrapper for `'dance'` and `'edit'` themes.
+- `src/utils/i18n.js`: Bilingual dictionary (`zh` / `en`). **IMPORTANT**: Preserve the user's exact customized Chinese (`zh`) terminology (e.g., `段落 1`, `多段落循环`, `正 / 镜面区间设置`).
 
-## 3. Data Schema (Per Video Entry inside `project.videos[]`)
+## 3. Git workflow
+- `main` must stay runnable. Implement work on `feat/<name>` (or `fix/<name>`), then merge after the feature is verified.
+
+## 4. Data Schema (Per Video Entry inside `project.videos[]`)
 ```js
 {
   id: string,
@@ -46,5 +47,11 @@ You are maintaining and extending **Dance Studio Pro**, a client-side choreograp
   mirrorStrategy: 'auto' | 'forceOn' | 'forceOff',
   globalRate: number,      // 0.25 - 1.50
   syncLoopRate: boolean,   // true = override segment playbackRate with globalRate
-  loopFullTrack: boolean
+  loopFullTrack: boolean,
+  playMode: 'single' | 'highlights' | 'practice' | 'off',
+  highlightsMode: 'sequential' | 'merged',
+  playerScale: number,
+  selectedSegmentIndex: number,
+  selectedMirrorIndex: number,
 }
+```
