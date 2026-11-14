@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node scripts/test-eight-beat.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { clampIndex } from '../../utils/clampIndex';
+import { buildEightBeatSegments } from '../../utils/beatAnalyzer';
 
 const SPEED_PRESETS = [0.8, 0.9, 1.0];
 
@@ -41,6 +43,35 @@ export default function LoopControlPanel({
   triggerFramePreview,
 }) {
   const isFullLoop = currentVideo.loopFullTrack ?? true;
+  const [splitBusy, setSplitBusy] = useState(false);
+  const [splitMsg, setSplitMsg] = useState(null);
+
+  const autoSplitEightBeats = async () => {
+    if (splitBusy || !currentVideo?.file) return;
+    if (currentVideo.segments.length > 0 && !window.confirm(t.autoEightBeatConfirm)) return;
+
+    setSplitBusy(true);
+    setSplitMsg(t.autoEightBeatWorking);
+    try {
+      const duration = videoRef.current?.duration || 0;
+      const { segments, bpm } = await buildEightBeatSegments(
+        currentVideo.file,
+        duration,
+        t.eightBeatSegName
+      );
+      setActiveSegmentIndex(0);
+      await updateCurrentVideoConfig(() => ({
+        segments,
+        selectedSegmentIndex: 0,
+        detectedBpm: bpm,
+      }));
+      setSplitMsg(t.autoEightBeatDone(segments.length, Math.round(bpm)));
+    } catch {
+      setSplitMsg(t.autoEightBeatFail);
+    } finally {
+      setSplitBusy(false);
+    }
+  };
 
   const addSegmentAtPlayhead = () => {
     if (!videoRef.current) return;
@@ -192,15 +223,28 @@ export default function LoopControlPanel({
       </div>
 
       <div className="bg-gray-900 p-4 rounded-xl border border-gray-800">
-        <div className="flex justify-between items-center mb-3">
+        <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
           <h2 className="text-sm font-semibold text-gray-200">{t.segmentListTitle}</h2>
-          <button
-            onClick={addSegmentAtPlayhead}
-            className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
-          >
-            {t.addSegmentBtn}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={splitBusy}
+              onClick={autoSplitEightBeats}
+              className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
+            >
+              {splitBusy ? t.autoEightBeatWorking : t.autoEightBeatBtn}
+            </button>
+            <button
+              onClick={addSegmentAtPlayhead}
+              className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
+            >
+              {t.addSegmentBtn}
+            </button>
+          </div>
         </div>
+        {splitMsg && (
+          <p className="text-[11px] text-amber-300/90 mb-3">{splitMsg}</p>
+        )}
 
         <div className="space-y-2.5">
           {currentVideo.segments.length === 0 ? (
