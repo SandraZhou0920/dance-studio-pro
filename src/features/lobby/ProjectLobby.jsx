@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { isEditorReady } from '../editor';
 import VideoFileButton from '../../components/shared/VideoFileButton';
+import { isFileDragEvent } from '../../utils/pickVideoFiles';
 
 export default function ProjectLobby({
   t,
@@ -18,6 +19,7 @@ export default function ProjectLobby({
   const [dropActive, setDropActive] = useState(false);
 
   const onDropVideos = (e) => {
+    if (!isFileDragEvent(e)) return;
     e.preventDefault();
     setDropActive(false);
     onCreateProject(e.dataTransfer.files, activeTheme);
@@ -86,10 +88,12 @@ export default function ProjectLobby({
 
         <div
           onDragEnter={(e) => {
+            if (!isFileDragEvent(e)) return;
             e.preventDefault();
             setDropActive(true);
           }}
           onDragOver={(e) => {
+            if (!isFileDragEvent(e)) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
             setDropActive(true);

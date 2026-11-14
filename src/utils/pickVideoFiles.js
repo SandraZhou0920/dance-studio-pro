@@ -26,13 +26,22 @@ function looksLikeMp4(buffer) {
   return mark === 'ftyp';
 }
 
-async function materializeFile(file) {
-  if (file.size > 0) return file;
+function videoFileName(file) {
+  if (file.name && VIDEO_EXT.test(file.name)) return file.name;
+  if (file.name) return `${file.name}.mp4`;
+  return 'photo-library.mp4';
+}
+
+/** 照片图库给的 File 常常不能随机 seek，拷成内存 Blob 后进度条才能拖。 */
+async function makeSeekableVideoFile(file) {
   const buf = await file.arrayBuffer();
   if (buf.byteLength === 0) return null;
-  return new File([buf], file.name || 'photo-library.mov', {
-    type: file.type || 'video/mp4',
-  });
+  const type = file.type && file.type.startsWith('video/') ? file.type : 'video/mp4';
+  return new File([buf], videoFileName(file), { type });
+}
+
+export function isFileDragEvent(e) {
+  return Array.from(e.dataTransfer?.types || []).includes('Files');
 }
 
 function isVideoFile(file, head) {
@@ -47,20 +56,21 @@ export async function pickVideoFiles(fileList) {
   const out = [];
   for (const raw of Array.from(fileList || [])) {
     if (!raw) continue;
-    let file = raw;
-    try {
-      file = (await materializeFile(raw)) || raw;
-    } catch {
-      continue;
-    }
     let head = null;
     try {
-      head = await file.slice(0, 16).arrayBuffer();
+      head = await raw.slice(0, 16).arrayBuffer();
     } catch {
       head = null;
     }
-    if (file.size <= 0 && (!head || head.byteLength === 0)) continue;
-    if (isVideoFile(file, head)) out.push(file);
+    if (!isVideoFile(raw, head) && raw.size > 0) continue;
+    let file = null;
+    try {
+      file = await makeSeekableVideoFile(raw);
+    } catch {
+      continue;
+    }
+    if (!file) continue;
+    if (isVideoFile(file, head) || looksLikeMp4(head)) out.push(file);
   }
   return out;
 }

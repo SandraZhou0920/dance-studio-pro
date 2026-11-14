@@ -8,7 +8,7 @@ import usePracticeShortcuts from './usePracticeShortcuts';
 import LoopControlPanel from './LoopControlPanel';
 import MirrorControlPanel from './MirrorControlPanel';
 import VideoFileButton from '../../components/shared/VideoFileButton';
-import { pickVideoFiles } from '../../utils/pickVideoFiles';
+import { pickVideoFiles, isFileDragEvent } from '../../utils/pickVideoFiles';
 
 export default function PracticeWorkspace({
   project,
@@ -188,10 +188,12 @@ export default function PracticeWorkspace({
       dir="ltr"
       className="min-h-screen bg-gray-950 text-white p-5 flex flex-col gap-4"
       onDragOver={(e) => {
+        if (!isFileDragEvent(e)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
       }}
       onDrop={(e) => {
+        if (!isFileDragEvent(e)) return;
         e.preventDefault();
         ingestVideoFiles(e.dataTransfer.files);
       }}

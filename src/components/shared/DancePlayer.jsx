@@ -120,7 +120,7 @@ export default function DancePlayer({
           return prev;
         });
 
-        if (!video.paused) {
+        if (!video.paused && !isSeekingRef.current && !video.seeking) {
           const getSegRate = (seg) =>
             syncLoopRate ? globalRate : (seg.playbackRate ?? globalRate);
 
@@ -324,9 +324,19 @@ export default function DancePlayer({
   };
 
   const handleScrub = (e) => {
-    const newTime = parseFloat(e.target.value);
-    if (videoRef.current) {
-      videoRef.current.currentTime = newTime;
+    const video = videoRef.current;
+    if (!video) return;
+    const raw = parseFloat(e.target.value);
+    if (!Number.isFinite(raw)) return;
+    isSeekingRef.current = true;
+    const dur = video.duration;
+    const next =
+      Number.isFinite(dur) && dur > 0 ? Math.min(Math.max(0, raw), Math.max(0, dur - 0.05)) : raw;
+    try {
+      if (typeof video.fastSeek === 'function') video.fastSeek(next);
+      else video.currentTime = next;
+    } catch {
+      video.currentTime = next;
     }
   };
 
@@ -355,6 +365,7 @@ export default function DancePlayer({
         <video
           ref={videoRef}
           src={videoUrl}
+          preload="auto"
           playsInline
           muted={false}
           disablePictureInPicture

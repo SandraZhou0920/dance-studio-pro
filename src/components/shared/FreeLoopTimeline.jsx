@@ -111,11 +111,19 @@ export default function FreeLoopTimeline({
     if (!videoUrl || !containerRef.current) return;
 
     const container = containerRef.current;
+    const videoEl = videoRef?.current;
     let cancelled = false;
     let rafId = 0;
     let syncCancelled = false;
     let resizeObserver = null;
     let ws = null;
+    const applyVideoDuration = () => {
+      const d = videoRef?.current?.duration;
+      if (!ws || !Number.isFinite(d) || d <= 0) return;
+      if (Math.abs(ws.getDuration() - d) > 0.25) {
+        ws.setOptions({ duration: d });
+      }
+    };
 
     const boot = async () => {
       await waitForWidth(container);
@@ -165,15 +173,30 @@ export default function FreeLoopTimeline({
         setTimelineReady((n) => n + 1);
       });
 
+      let userSeeking = false;
+      let userSeekTimer = 0;
+      const markUserSeek = () => {
+        userSeeking = true;
+        window.clearTimeout(userSeekTimer);
+        userSeekTimer = window.setTimeout(() => {
+          userSeeking = false;
+        }, 160);
+      };
+
       ws.on('interaction', (newTime) => {
         if (syncingFromVideoRef.current) return;
+        markUserSeek();
         callbacksRef.current.onSeek?.(newTime);
       });
+
+      videoEl?.addEventListener('loadedmetadata', applyVideoDuration);
+      videoEl?.addEventListener('durationchange', applyVideoDuration);
+      applyVideoDuration();
 
       const syncPlayhead = () => {
         if (syncCancelled || !ws) return;
         const video = videoRef?.current;
-        if (video && ws.getDuration()) {
+        if (video && ws.getDuration() && !userSeeking && !syncingFromVideoRef.current) {
           const videoTime = video.currentTime || 0;
           if (Math.abs(ws.getCurrentTime() - videoTime) > 0.03) {
             syncingFromVideoRef.current = true;
@@ -251,6 +274,8 @@ export default function FreeLoopTimeline({
       cancelled = true;
       syncCancelled = true;
       cancelAnimationFrame(rafId);
+      videoEl?.removeEventListener('loadedmetadata', applyVideoDuration);
+      videoEl?.removeEventListener('durationchange', applyVideoDuration);
       resizeObserver?.disconnect();
       ws?.destroy();
       wsRef.current = null;
