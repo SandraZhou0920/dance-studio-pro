@@ -1,1 +1,11 @@
 @import "tailwindcss";
+
+/* 隐藏系统控件，避免 iOS/微信全屏层被镜面 transform 一起翻转 */
+video::-webkit-media-controls,
+video::-webkit-media-controls-enclosure,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+}

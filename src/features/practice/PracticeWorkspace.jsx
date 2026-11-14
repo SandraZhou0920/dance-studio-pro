@@ -43,8 +43,10 @@ export default function PracticeWorkspace({
   const triggerFramePreview = (targetTime, label) => {
     const video = videoRef.current;
     if (video && !isNaN(targetTime)) {
-      video.pause();
-      video.currentTime = Math.max(0, Math.min(video.duration || targetTime, targetTime));
+      // 播放中只加区间、不打断；暂停时才跳帧预览
+      if (video.paused) {
+        video.currentTime = Math.max(0, Math.min(video.duration || targetTime, targetTime));
+      }
     }
     setPreviewLabel(t.previewingBadge(label, targetTime.toFixed(2)));
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
@@ -172,7 +174,7 @@ export default function PracticeWorkspace({
   });
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-5 flex flex-col gap-4">
+    <div dir="ltr" className="min-h-screen bg-gray-950 text-white p-5 flex flex-col gap-4">
       <header className="flex flex-wrap justify-between items-center border-b border-gray-800 pb-3 gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -272,7 +274,7 @@ export default function PracticeWorkspace({
             t={t}
           />
 
-          <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
+          <div dir="ltr" className="flex items-center gap-2 border-b border-gray-800 pb-2">
             <button
               onClick={() => selectFeatureTab('loop')}
               className={`px-4 py-2 rounded-t-lg text-sm font-semibold cursor-pointer transition border-b-2 ${

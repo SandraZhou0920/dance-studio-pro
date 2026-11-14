@@ -40,6 +40,52 @@ export default function DancePlayer({
     setScale(playerScale ?? 1);
   }, [videoUrl]);
 
+  // iOS / 微信：禁止原生全屏，避免全屏控件跟着镜面一起翻转
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.playsInline = true;
+    video.controls = false;
+    video.disablePictureInPicture = true;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
+    video.setAttribute('x5-playsinline', 'true');
+    video.setAttribute('x5-video-player-type', 'h5');
+    video.setAttribute('x5-video-player-fullscreen', 'false');
+    video.setAttribute('controlslist', 'nofullscreen nodownload noremoteplayback');
+
+    const keepInline = () => {
+      try {
+        if (video.webkitDisplayingFullscreen) video.webkitExitFullscreen();
+        if (document.fullscreenElement === video) document.exitFullscreen();
+        if (video.webkitPresentationMode && video.webkitPresentationMode !== 'inline') {
+          video.webkitSetPresentationMode('inline');
+        }
+      } catch {
+        /* older WebKit */
+      }
+    };
+
+    const onBeginFullscreen = (e) => {
+      e.preventDefault?.();
+      keepInline();
+    };
+
+    video.addEventListener('webkitbeginfullscreen', onBeginFullscreen);
+    video.addEventListener('webkitpresentationmodechanged', keepInline);
+    video.addEventListener('fullscreenchange', keepInline);
+    video.addEventListener('play', keepInline);
+    keepInline();
+
+    return () => {
+      video.removeEventListener('webkitbeginfullscreen', onBeginFullscreen);
+      video.removeEventListener('webkitpresentationmodechanged', keepInline);
+      video.removeEventListener('fullscreenchange', keepInline);
+      video.removeEventListener('play', keepInline);
+    };
+  }, [videoRef, videoUrl]);
+
   const computeMirrorAtTime = (time) => {
     if (mirrorStrategy === 'forceOn') return true;
     if (mirrorStrategy === 'forceOff') return false;
@@ -297,65 +343,63 @@ export default function DancePlayer({
   const isPlaying = videoEl ? !videoEl.paused : false;
 
   return (
-    <div className="w-full bg-black rounded-xl border border-gray-800 overflow-hidden flex flex-col select-none">
-      {/* 视频画面区域 */}
+    <div
+      dir="ltr"
+      className="w-full bg-black rounded-xl border border-gray-800 overflow-hidden flex flex-col select-none"
+    >
+      {/* 视频画面区域：控件/角标绝不能放进带 transform 的祖先里（iOS 会把整页当全屏层翻转） */}
       <div
         className="relative w-full h-[46vh] overflow-hidden flex items-center justify-center bg-black"
         onWheel={handleWheel}
       >
-        {/* 外层容器：负责快速跟手的滚轮缩放 */}
-        <div
-          className="w-full h-full flex items-center justify-center transition-transform duration-75 ease-out will-change-transform"
-          style={{
-            transform: `scale(${scale})`,
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          playsInline
+          muted={false}
+          disablePictureInPicture
+          controls={false}
+          controlsList="nofullscreen nodownload noremoteplayback"
+          webkit-playsinline="true"
+          x5-playsinline="true"
+          x5-video-player-type="h5"
+          x5-video-player-fullscreen="false"
+          onClick={togglePlay}
+          onSeeking={() => {
+            isSeekingRef.current = true;
           }}
-        >
-          {/* 内层容器：独立负责丝滑的水平镜面翻转（GPU 合成层加速 + 缓出曲线） */}
-          <div
-            className="w-full h-full flex items-center justify-center will-change-transform"
-            style={{
-              transform: effectiveMirrored ? 'scaleX(-1)' : 'scaleX(1)',
-              transition: smoothMirrorTransition
-                ? 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)'
-                : 'none',
-            }}
-          >
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              onClick={togglePlay}
-              onSeeking={() => {
-                isSeekingRef.current = true;
-              }}
-              onSeeked={() => {
-                isSeekingRef.current = false;
-                // 定位完成后恢复丝滑过渡状态，供后续播放使用
-                requestAnimationFrame(() => setSmoothMirrorTransition(true));
-              }}
-              onEnded={() => {
-                const video = videoRef.current;
-                if (!video) return;
+          onSeeked={() => {
+            isSeekingRef.current = false;
+            requestAnimationFrame(() => setSmoothMirrorTransition(true));
+          }}
+          onEnded={() => {
+            const video = videoRef.current;
+            if (!video) return;
 
-                // 单段 / 多段循环由状态机接回段落起点，不能被全曲循环拉回 0
-                if (segments.length > 0 && (playMode === 'single' || playMode === 'highlights')) {
-                  const currentSeg = segments[activeSegmentIndex] || segments[0];
-                  video.currentTime = currentSeg.start;
-                  video.play().catch(() => {});
-                  return;
-                }
+            if (segments.length > 0 && (playMode === 'single' || playMode === 'highlights')) {
+              const currentSeg = segments[activeSegmentIndex] || segments[0];
+              video.currentTime = currentSeg.start;
+              video.play().catch(() => {});
+              return;
+            }
 
-                completedSegIdsRef.current.clear();
-                lastSegIdRef.current = null;
-                currentLoopCountRef.current = 1;
-                if (loopFullTrack) {
-                  video.currentTime = 0;
-                  video.play().catch(() => {});
-                }
-              }}
-              className="max-h-full max-w-full cursor-pointer"
-            />
-          </div>
-        </div>
+            completedSegIdsRef.current.clear();
+            lastSegIdRef.current = null;
+            currentLoopCountRef.current = 1;
+            if (loopFullTrack) {
+              video.currentTime = 0;
+              video.play().catch(() => {});
+            }
+          }}
+          className="max-h-full max-w-full cursor-pointer will-change-transform"
+          style={{
+            transform: `scale(${scale}) scaleX(${effectiveMirrored ? -1 : 1})`,
+            transformOrigin: 'center center',
+            transition: smoothMirrorTransition
+              ? 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)'
+              : 'none',
+          }}
+        />
 
         {/* 左上角：当前镜面状态（颜色同步平滑渐变） */}
         <div
