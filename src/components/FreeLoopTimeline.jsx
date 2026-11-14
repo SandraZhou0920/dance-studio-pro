@@ -4,6 +4,7 @@ import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 
 export default function FreeLoopTimeline({
   videoUrl,
+  videoRef,            // 与播放器共用同一时间轴，仅同步光标，不接管 <video>
   editTarget,          // 'loop' | 'mirror' —— 决定当前时间轴操作的是循环段还是镜面区间
   segments,
   mirrorZones,
@@ -24,6 +25,7 @@ export default function FreeLoopTimeline({
   const containerRef = useRef(null);
   const wsRef = useRef(null);
   const regionsPluginRef = useRef(null);
+  const syncingFromVideoRef = useRef(false);
 
   // 使用 ref 保持最新回调，避免 WaveSurfer 闭包过期
   const callbacksRef = useRef({
@@ -63,21 +65,59 @@ export default function FreeLoopTimeline({
       height: 90,
       barWidth: 2,
       url: videoUrl,
+      // 独立解码波形，不把播放器 <video> 交给 WaveSurfer，避免抢走 playbackRate
+      interact: true,
+      dragToSeek: true,
+      autoplay: false,
     });
 
     const wsRegions = ws.registerPlugin(RegionsPlugin.create());
     wsRef.current = ws;
     regionsPluginRef.current = wsRegions;
 
+    ws.setMuted(true);
+    ws.setVolume(0);
+
+    // WaveSurfer 自带隐藏音轨，禁止它发声或自行播放，时间只跟视频走
+    ws.on('play', () => {
+      ws.pause();
+    });
+
     ws.on('ready', () => {
+      ws.pause();
+      ws.setMuted(true);
       wsRegions.enableDragSelection({
         color: 'rgba(99, 102, 241, 0.3)',
       });
+      const video = videoRef?.current;
+      if (video && !Number.isNaN(video.currentTime)) {
+        syncingFromVideoRef.current = true;
+        ws.setTime(video.currentTime);
+        syncingFromVideoRef.current = false;
+      }
     });
 
     ws.on('interaction', (newTime) => {
+      if (syncingFromVideoRef.current) return;
       callbacksRef.current.onSeek?.(newTime);
     });
+
+    let rafId = 0;
+    let syncCancelled = false;
+    const syncPlayhead = () => {
+      if (syncCancelled) return;
+      const video = videoRef?.current;
+      if (video && ws.getDuration()) {
+        const videoTime = video.currentTime || 0;
+        if (Math.abs(ws.getCurrentTime() - videoTime) > 0.03) {
+          syncingFromVideoRef.current = true;
+          ws.setTime(videoTime);
+          syncingFromVideoRef.current = false;
+        }
+      }
+      rafId = requestAnimationFrame(syncPlayhead);
+    };
+    rafId = requestAnimationFrame(syncPlayhead);
 
     // 在波形上直接框选创建新区间（根据当前所在的 Feature Tab 创建循环段或镜面区间）
     wsRegions.on('region-created', (newRegion) => {
@@ -127,8 +167,12 @@ export default function FreeLoopTimeline({
       }
     });
 
-    return () => ws.destroy();
-  }, [videoUrl]);
+    return () => {
+      syncCancelled = true;
+      cancelAnimationFrame(rafId);
+      ws.destroy();
+    };
+  }, [videoUrl, videoRef]);
 
   // 根据当前处于「循环 Feature」还是「镜面 Feature」，渲染对应的可交互区间
   useEffect(() => {
@@ -145,12 +189,8 @@ export default function FreeLoopTimeline({
           id: zone.id,
           start: zone.start,
           end: zone.end,
-          content: `#${index + 1} ${zone.name} (${zone.isMirrored ? 'Mirrored' : 'Normal'})`,
-          color: isSelected
-            ? 'rgba(6, 182, 212, 0.45)'
-            : zone.isMirrored
-            ? 'rgba(6, 182, 212, 0.25)'
-            : 'rgba(156, 163, 175, 0.25)',
+          content: `#${index + 1} ${zone.name}`,
+          color: isSelected ? 'rgba(6, 182, 212, 0.45)' : 'rgba(6, 182, 212, 0.25)',
           drag: true,
           resize: true,
         });

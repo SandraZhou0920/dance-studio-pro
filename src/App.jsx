@@ -8,6 +8,12 @@ import {
 } from './utils/projectCache';
 import { translations } from './utils/i18n';
 
+const clampIndex = (idx, length) => {
+  if (!length || length < 1) return 0;
+  const n = Number.isFinite(idx) ? idx : 0;
+  return Math.max(0, Math.min(length - 1, n));
+};
+
 export default function App() {
   const [lang, setLang] = useState(() => localStorage.getItem('studio-lang') || 'zh');
   const t = translations[lang];
@@ -80,11 +86,13 @@ export default function App() {
       setActiveVideoUrl(null);
       return;
     }
-    const file = currentProject.videos[activeVideoIndex].file;
-    const url = URL.createObjectURL(file);
+    const vid = currentProject.videos[activeVideoIndex];
+    const url = URL.createObjectURL(vid.file);
     setActiveVideoUrl(url);
-    setActiveSegmentIndex(0);
-    setActiveMirrorIndex(0);
+    setPlayMode(vid.playMode ?? 'practice');
+    setHighlightsMode(vid.highlightsMode ?? 'sequential');
+    setActiveSegmentIndex(clampIndex(vid.selectedSegmentIndex, vid.segments?.length ?? 0));
+    setActiveMirrorIndex(clampIndex(vid.selectedMirrorIndex, vid.mirrorZones?.length ?? 0));
 
     return () => URL.revokeObjectURL(url);
   }, [currentProject?.id, activeVideoIndex]);
@@ -93,25 +101,22 @@ export default function App() {
     id: `vid-${Date.now()}-${idx}`,
     name: file.name,
     file,
-    segments: [
-      {
-        id: `seg-${Date.now()}-${idx}`,
-        name: t.defaultSegName(1),
-        start: 0,
-        end: 4,
-        targetLoops: 3,
-        playbackRate: 0.75,
-      },
-    ],
+    segments: [],
     mirrorZones: [],
     mirrorStrategy: 'auto',
     globalRate: 1.0,
     syncLoopRate: false,
     loopFullTrack: true,
+    playMode: 'practice',
+    highlightsMode: 'sequential',
+    playerScale: 1,
+    selectedSegmentIndex: 0,
+    selectedMirrorIndex: 0,
   });
 
   const handleCreateProject = async (e, theme) => {
     const files = Array.from(e.target.files || []);
+    e.target.value = '';
     if (files.length === 0) return;
 
     const projectTitle =
@@ -126,6 +131,8 @@ export default function App() {
       theme,
       title: projectTitle,
       videos: videoEntries,
+      activeVideoIndex: 0,
+      activeFeatureTab: 'loop',
     };
 
     const saved = await saveProject(newProject);
@@ -139,18 +146,21 @@ export default function App() {
 
   const handleAddVideosToProject = async (e) => {
     const files = Array.from(e.target.files || []);
+    e.target.value = '';
     if (files.length === 0 || !currentProject) return;
 
     const newEntries = files.map((file, idx) => createDefaultVideoEntry(file, idx));
 
+    const nextIndex = currentProject.videos.length;
     const updatedProject = {
       ...currentProject,
       videos: [...currentProject.videos, ...newEntries],
+      activeVideoIndex: nextIndex,
     };
 
     const saved = await saveProject(updatedProject);
     setCurrentProject(saved);
-    setActiveVideoIndex(saved.videos.length - newEntries.length);
+    setActiveVideoIndex(nextIndex);
     await loadAllProjects();
   };
 
@@ -159,14 +169,20 @@ export default function App() {
     if (!currentProject || currentProject.videos.length <= 1) return;
 
     const updatedVideos = currentProject.videos.filter((_, idx) => idx !== idxToRemove);
-    const updatedProject = { ...currentProject, videos: updatedVideos };
-    const saved = await saveProject(updatedProject);
+    let nextIndex = activeVideoIndex;
+    if (idxToRemove === activeVideoIndex) {
+      nextIndex = Math.min(idxToRemove, updatedVideos.length - 1);
+    } else if (idxToRemove < activeVideoIndex) {
+      nextIndex = activeVideoIndex - 1;
+    }
+    const saved = await saveProject({
+      ...currentProject,
+      videos: updatedVideos,
+      activeVideoIndex: nextIndex,
+    });
 
     setCurrentProject(saved);
-    if (activeVideoIndex >= updatedVideos.length) {
-      setActiveSegmentIndex(0);
-      setActiveVideoIndex(updatedVideos.length - 1);
-    }
+    setActiveVideoIndex(nextIndex);
     await loadAllProjects();
   };
 
@@ -180,8 +196,63 @@ export default function App() {
     await saveProject(updatedProject);
   };
 
+  const persistProjectWorkspace = async (patch) => {
+    if (!currentProject) return;
+    const updated = { ...currentProject, ...patch };
+    setCurrentProject(updated);
+    await saveProject(updated);
+  };
+
+  const selectVideoIndex = (idx) => {
+    setActiveVideoIndex(idx);
+    persistProjectWorkspace({ activeVideoIndex: idx });
+  };
+
+  const selectFeatureTab = (tab) => {
+    setActiveFeatureTab(tab);
+    persistProjectWorkspace({ activeFeatureTab: tab });
+  };
+
+  const persistPlayMode = (mode) => {
+    setPlayMode(mode);
+    updateCurrentVideoConfig(() => ({ playMode: mode }));
+  };
+
+  const persistHighlightsMode = (mode) => {
+    setHighlightsMode(mode);
+    updateCurrentVideoConfig(() => ({ highlightsMode: mode }));
+  };
+
+  const persistSelectedSegment = (idx) => {
+    setActiveSegmentIndex(idx);
+    updateCurrentVideoConfig(() => ({ selectedSegmentIndex: idx }));
+  };
+
+  const persistSelectedMirror = (idx) => {
+    setActiveMirrorIndex(idx);
+    updateCurrentVideoConfig(() => ({ selectedMirrorIndex: idx }));
+  };
+
+  const moveSegment = (fromIndex, direction) => {
+    if (!currentVideo) return;
+    const toIndex = fromIndex + direction;
+    if (toIndex < 0 || toIndex >= currentVideo.segments.length) return;
+    const updated = [...currentVideo.segments];
+    const [moved] = updated.splice(fromIndex, 1);
+    updated.splice(toIndex, 0, moved);
+    setActiveSegmentIndex(toIndex);
+    updateCurrentVideoConfig(() => ({
+      segments: updated,
+      selectedSegmentIndex: toIndex,
+    }));
+  };
+
   const handleDeleteProject = async (e, theme, projectId) => {
     e.stopPropagation();
+    const list = theme === 'dance' ? danceProjects : editProjects;
+    const proj = list.find((p) => p.id === projectId);
+    const ok = window.confirm(t.confirmDeleteProject(proj?.title || projectId));
+    if (!ok) return;
     await deleteProject(theme, projectId);
     await loadAllProjects();
   };
@@ -193,26 +264,47 @@ export default function App() {
     const handleKeyDown = (e) => {
       if (e.target.tagName === 'INPUT') return;
       const currentSeg = currentVideo.segments[activeSegmentIndex];
+      const currentZone = (currentVideo.mirrorZones || [])[activeMirrorIndex];
       const video = videoRef.current;
 
-      if (e.key.toLowerCase() === 'a' && currentSeg && video) {
+      if (e.key.toLowerCase() === 'a' && video) {
         const now = Number(video.currentTime.toFixed(2));
-        updateCurrentVideoConfig((v) => ({
-          segments: v.segments.map((s, i) =>
-            i === activeSegmentIndex
-              ? { ...s, start: now, end: now >= s.end ? now + 3 : s.end }
-              : s
-          ),
-        }));
-      } else if (e.key.toLowerCase() === 'b' && currentSeg && video) {
+        if (activeFeatureTab === 'mirror' && currentZone) {
+          updateCurrentVideoConfig((v) => ({
+            mirrorZones: (v.mirrorZones || []).map((z, i) =>
+              i === activeMirrorIndex
+                ? { ...z, start: now, end: now >= z.end ? now + 3 : z.end }
+                : z
+            ),
+          }));
+        } else if (activeFeatureTab !== 'mirror' && currentSeg) {
+          updateCurrentVideoConfig((v) => ({
+            segments: v.segments.map((s, i) =>
+              i === activeSegmentIndex
+                ? { ...s, start: now, end: now >= s.end ? now + 3 : s.end }
+                : s
+            ),
+          }));
+        }
+      } else if (e.key.toLowerCase() === 'b' && video) {
         const now = Number(video.currentTime.toFixed(2));
-        updateCurrentVideoConfig((v) => ({
-          segments: v.segments.map((s, i) =>
-            i === activeSegmentIndex
-              ? { ...s, start: now <= s.start ? Math.max(0, now - 3) : s.start, end: now }
-              : s
-          ),
-        }));
+        if (activeFeatureTab === 'mirror' && currentZone) {
+          updateCurrentVideoConfig((v) => ({
+            mirrorZones: (v.mirrorZones || []).map((z, i) =>
+              i === activeMirrorIndex
+                ? { ...z, start: now <= z.start ? Math.max(0, now - 3) : z.start, end: now }
+                : z
+            ),
+          }));
+        } else if (activeFeatureTab !== 'mirror' && currentSeg) {
+          updateCurrentVideoConfig((v) => ({
+            segments: v.segments.map((s, i) =>
+              i === activeSegmentIndex
+                ? { ...s, start: now <= s.start ? Math.max(0, now - 3) : s.start, end: now }
+                : s
+            ),
+          }));
+        }
       } else if (e.key === '[' || e.key === '-') {
         if (statusInfo.inLoop && !currentVideo.syncLoopRate && currentSeg) {
           updateCurrentVideoConfig((v) => ({
@@ -248,7 +340,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentVideo, activeSegmentIndex, statusInfo.inLoop]);
+  }, [currentVideo, activeSegmentIndex, activeMirrorIndex, activeFeatureTab, statusInfo.inLoop]);
 
   // =========================================================================
   // 视图 A：开始页面（双主题项目大厅）
@@ -360,7 +452,8 @@ export default function App() {
                           return;
                         }
                         setCurrentProject(proj);
-                        setActiveVideoIndex(0);
+                        setActiveVideoIndex(clampIndex(proj.activeVideoIndex, proj.videos.length));
+                        setActiveFeatureTab(proj.activeFeatureTab === 'mirror' ? 'mirror' : 'loop');
                       }}
                       className="bg-gray-800/70 hover:bg-gray-800 border border-gray-700 hover:border-indigo-500 rounded-xl p-4 cursor-pointer transition flex flex-col justify-between gap-4 group"
                     >
@@ -384,7 +477,7 @@ export default function App() {
                               className="text-xs text-gray-400 flex items-center gap-2 truncate"
                             >
                               <span className="text-indigo-400 font-mono text-[11px]">
-                                0{i + 1}
+                                {String(i + 1).padStart(2, '0')}
                               </span>
                               <span className="truncate">{v.name}</span>
                             </div>
@@ -488,7 +581,7 @@ export default function App() {
           return (
             <div
               key={vid.id}
-              onClick={() => setActiveVideoIndex(idx)}
+              onClick={() => selectVideoIndex(idx)}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs cursor-pointer border transition whitespace-nowrap ${
                 isSelected
                   ? 'bg-indigo-600 border-indigo-400 text-white font-medium'
@@ -522,6 +615,10 @@ export default function App() {
             mirrorStrategy={mirrorStrategy}
             activeSegmentIndex={activeSegmentIndex}
             setActiveSegmentIndex={setActiveSegmentIndex}
+            playerScale={currentVideo.playerScale ?? 1}
+            onScaleChange={(scale) =>
+              updateCurrentVideoConfig(() => ({ playerScale: scale }))
+            }
             playMode={playMode}
             highlightsMode={highlightsMode}
             loopFullTrack={isFullLoop}
@@ -535,7 +632,7 @@ export default function App() {
           {/* 2. 独立 Feature 切换标签栏：段落循环与变速 vs 正/镜面区间设置 */}
           <div className="flex items-center gap-2 border-b border-gray-800 pb-2">
             <button
-              onClick={() => setActiveFeatureTab('loop')}
+              onClick={() => selectFeatureTab('loop')}
               className={`px-4 py-2 rounded-t-lg text-sm font-semibold cursor-pointer transition border-b-2 ${
                 activeFeatureTab === 'loop'
                   ? 'bg-gray-900 text-indigo-400 border-indigo-500'
@@ -546,7 +643,7 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setActiveFeatureTab('mirror')}
+              onClick={() => selectFeatureTab('mirror')}
               className={`px-4 py-2 rounded-t-lg text-sm font-semibold cursor-pointer transition border-b-2 ${
                 activeFeatureTab === 'mirror'
                   ? 'bg-gray-900 text-cyan-400 border-cyan-500'
@@ -560,6 +657,7 @@ export default function App() {
           {/* 3. 音频波形时间轴 */}
           <FreeLoopTimeline
             videoUrl={activeVideoUrl}
+            videoRef={videoRef}
             editTarget={activeFeatureTab}
             segments={currentVideo.segments}
             mirrorZones={mirrorZones}
@@ -570,14 +668,14 @@ export default function App() {
             onSelectSegment={(id) => {
               const idx = currentVideo.segments.findIndex((s) => s.id === id);
               if (idx !== -1) {
-                setActiveSegmentIndex(idx);
+                persistSelectedSegment(idx);
                 triggerFramePreview(currentVideo.segments[idx].start, currentVideo.segments[idx].name);
               }
             }}
             onSelectMirrorZone={(id) => {
               const idx = mirrorZones.findIndex((z) => z.id === id);
               if (idx !== -1) {
-                setActiveMirrorIndex(idx);
+                persistSelectedMirror(idx);
                 triggerFramePreview(mirrorZones[idx].start, mirrorZones[idx].name);
               }
             }}
@@ -603,9 +701,10 @@ export default function App() {
                 playbackRate: 0.75,
               };
               updateCurrentVideoConfig((v) => {
-                const updated = [...v.segments, newSeg].sort((a, b) => a.start - b.start);
-                setActiveSegmentIndex(updated.findIndex((s) => s.id === newSeg.id));
-                return { segments: updated };
+                const updated = [...v.segments, newSeg];
+                const idx = updated.length - 1;
+                setActiveSegmentIndex(idx);
+                return { segments: updated, selectedSegmentIndex: idx };
               });
             }}
             onAddMirrorZone={(start, end) => {
@@ -620,8 +719,9 @@ export default function App() {
                 const updated = [...(v.mirrorZones || []), newZone].sort(
                   (a, b) => a.start - b.start
                 );
-                setActiveMirrorIndex(updated.findIndex((z) => z.id === newZone.id));
-                return { mirrorStrategy: 'auto', mirrorZones: updated };
+                const idx = updated.findIndex((z) => z.id === newZone.id);
+                setActiveMirrorIndex(idx);
+                return { mirrorStrategy: 'auto', mirrorZones: updated, selectedMirrorIndex: idx };
               });
             }}
             onPreviewFrame={triggerFramePreview}
@@ -642,7 +742,7 @@ export default function App() {
                   <div className="flex flex-wrap items-center gap-2">
                     {/* 1. 单段落循环 */}
                     <button
-                      onClick={() => setPlayMode('single')}
+                      onClick={() => persistPlayMode('single')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                         playMode === 'single'
                           ? 'bg-indigo-600 text-white'
@@ -654,7 +754,7 @@ export default function App() {
 
                     {/* 2. 多段落循环 */}
                     <button
-                      onClick={() => setPlayMode('highlights')}
+                      onClick={() => persistPlayMode('highlights')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                         playMode === 'highlights'
                           ? 'bg-rose-600 text-white'
@@ -666,7 +766,7 @@ export default function App() {
 
                     {/* 3. 练习模式（全曲 + 段落循环） */}
                     <button
-                      onClick={() => setPlayMode('practice')}
+                      onClick={() => persistPlayMode('practice')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                         playMode === 'practice'
                           ? 'bg-emerald-600 text-white'
@@ -678,7 +778,7 @@ export default function App() {
 
                     {/* 4. 关闭分段循环 */}
                     <button
-                      onClick={() => setPlayMode('off')}
+                      onClick={() => persistPlayMode('off')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition ${
                         playMode === 'off'
                           ? 'bg-gray-600 text-white'
@@ -704,7 +804,7 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-2 bg-rose-950/30 border border-rose-800/60 px-3 py-2 rounded-lg">
                       <span className="text-xs text-rose-300">{t.highlightsSubLabel}</span>
                       <button
-                        onClick={() => setHighlightsMode('sequential')}
+                        onClick={() => persistHighlightsMode('sequential')}
                         className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer transition ${
                           highlightsMode === 'sequential'
                             ? 'bg-rose-600 text-white'
@@ -714,7 +814,7 @@ export default function App() {
                         {t.highlightsSequential}
                       </button>
                       <button
-                        onClick={() => setHighlightsMode('merged')}
+                        onClick={() => persistHighlightsMode('merged')}
                         className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer transition ${
                           highlightsMode === 'merged'
                             ? 'bg-rose-600 text-white'
@@ -790,9 +890,10 @@ export default function App() {
                         playbackRate: 0.75,
                       };
                       updateCurrentVideoConfig((v) => {
-                        const updated = [...v.segments, newSeg].sort((a, b) => a.start - b.start);
-                        setActiveSegmentIndex(updated.findIndex((s) => s.id === newSeg.id));
-                        return { segments: updated };
+                        const updated = [...v.segments, newSeg];
+                        const idx = updated.length - 1;
+                        setActiveSegmentIndex(idx);
+                        return { segments: updated, selectedSegmentIndex: idx };
                       });
                     }}
                     className="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
@@ -802,7 +903,12 @@ export default function App() {
                 </div>
 
                 <div className="space-y-2.5">
-                  {currentVideo.segments.map((seg, index) => {
+                  {currentVideo.segments.length === 0 ? (
+                    <div className="text-center py-10 text-xs text-gray-500 border border-dashed border-gray-800 rounded-lg">
+                      {t.emptySegments}
+                    </div>
+                  ) : (
+                    currentVideo.segments.map((seg, index) => {
                     const isActive = index === activeSegmentIndex;
                     const segRate = seg.playbackRate ?? 0.75;
 
@@ -810,7 +916,7 @@ export default function App() {
                       <div
                         key={seg.id}
                         onClick={() => {
-                          setActiveSegmentIndex(index);
+                          persistSelectedSegment(index);
                           triggerFramePreview(seg.start, seg.name);
                         }}
                         className={`flex flex-wrap items-center justify-between p-3 rounded-lg border transition cursor-pointer gap-3 ${
@@ -941,24 +1047,50 @@ export default function App() {
                             <span className="text-xs text-gray-400">{t.segRepeatUnit}</span>
                           </div>
 
-                          {currentVideo.segments.length > 1 && (
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              title={t.moveSegUp}
+                              disabled={index === 0}
+                              onClick={() => moveSegment(index, -1)}
+                              className="text-gray-500 hover:text-indigo-300 px-1 py-1 text-xs disabled:opacity-30 disabled:hover:text-gray-500"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              title={t.moveSegDown}
+                              disabled={index === currentVideo.segments.length - 1}
+                              onClick={() => moveSegment(index, 1)}
+                              className="text-gray-500 hover:text-indigo-300 px-1 py-1 text-xs disabled:opacity-30 disabled:hover:text-gray-500"
+                            >
+                              ↓
+                            </button>
                             <button
                               onClick={() => {
                                 const updated = currentVideo.segments.filter((_, idx) => idx !== index);
-                                updateCurrentVideoConfig(() => ({ segments: updated }));
-                                if (activeSegmentIndex >= updated.length) {
-                                  setActiveSegmentIndex(updated.length - 1);
-                                }
+                                const nextIdx = clampIndex(
+                                  index === activeSegmentIndex
+                                    ? Math.min(index, updated.length - 1)
+                                    : index < activeSegmentIndex
+                                    ? activeSegmentIndex - 1
+                                    : activeSegmentIndex,
+                                  updated.length
+                                );
+                                setActiveSegmentIndex(nextIdx);
+                                updateCurrentVideoConfig(() => ({
+                                  segments: updated,
+                                  selectedSegmentIndex: nextIdx,
+                                }));
                               }}
                               className="text-gray-500 hover:text-red-400 px-1.5 py-1 text-xs"
                             >
                               ×
                             </button>
-                          )}
+                          </div>
                         </div>
                       </div>
                     );
-                  })}
+                    })
+                  )}
                 </div>
               </div>
             </div>
@@ -1024,8 +1156,13 @@ export default function App() {
                       const updated = [...(v.mirrorZones || []), newZone].sort(
                         (a, b) => a.start - b.start
                       );
-                      setActiveMirrorIndex(updated.findIndex((z) => z.id === newZone.id));
-                      return { mirrorStrategy: 'auto', mirrorZones: updated };
+                      const idx = updated.findIndex((z) => z.id === newZone.id);
+                      setActiveMirrorIndex(idx);
+                      return {
+                        mirrorStrategy: 'auto',
+                        mirrorZones: updated,
+                        selectedMirrorIndex: idx,
+                      };
                     });
                   }}
                   className="bg-cyan-600 hover:bg-cyan-500 px-3.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
@@ -1051,7 +1188,7 @@ export default function App() {
                         <div
                           key={zone.id}
                           onClick={() => {
-                            setActiveMirrorIndex(index);
+                            persistSelectedMirror(index);
                             triggerFramePreview(zone.start, zone.name);
                           }}
                           className={`flex flex-wrap items-center justify-between p-3 rounded-lg border transition cursor-pointer gap-3 ${
@@ -1132,30 +1269,21 @@ export default function App() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             <button
-                              onClick={() =>
-                                updateCurrentVideoConfig((v) => ({
-                                  mirrorStrategy: 'auto',
-                                  mirrorZones: v.mirrorZones.map((z) =>
-                                    z.id === zone.id ? { ...z, isMirrored: !z.isMirrored } : z
-                                  ),
-                                }))
-                              }
-                              className={`px-3 py-1.5 rounded text-xs font-medium cursor-pointer transition ${
-                                zone.isMirrored
-                                  ? 'bg-cyan-600 text-white'
-                                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                              }`}
-                            >
-                              {zone.isMirrored ? t.mirrorToggleBtnOn : t.mirrorToggleBtnOff}
-                            </button>
-
-                            <button
                               onClick={() => {
                                 const updated = mirrorZones.filter((_, idx) => idx !== index);
-                                updateCurrentVideoConfig(() => ({ mirrorZones: updated }));
-                                if (activeMirrorIndex >= updated.length) {
-                                  setActiveMirrorIndex(Math.max(0, updated.length - 1));
-                                }
+                                const nextIdx = clampIndex(
+                                  index === activeMirrorIndex
+                                    ? Math.min(index, updated.length - 1)
+                                    : index < activeMirrorIndex
+                                    ? activeMirrorIndex - 1
+                                    : activeMirrorIndex,
+                                  updated.length
+                                );
+                                setActiveMirrorIndex(nextIdx);
+                                updateCurrentVideoConfig(() => ({
+                                  mirrorZones: updated,
+                                  selectedMirrorIndex: nextIdx,
+                                }));
                               }}
                               className="text-gray-500 hover:text-red-400 px-1.5 py-1 text-xs"
                             >

@@ -15,10 +15,13 @@ export default function DancePlayer({
   syncLoopRate,
   previewLabel,
   onStatusUpdate,
+  playerScale,
+  onScaleChange,
   t,
 }) {
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(playerScale ?? 1);
   const [effectiveMirrored, setEffectiveMirrored] = useState(false);
+  const scaleSaveTimerRef = useRef(null);
   // 控制是否启用丝滑过渡动画（正常播放跨区间时为 true，手动拖拽进度条时瞬切为 false）
   const [smoothMirrorTransition, setSmoothMirrorTransition] = useState(true);
 
@@ -33,13 +36,14 @@ export default function DancePlayer({
     lastSegIdRef.current = null;
   }, [playMode, highlightsMode, videoUrl]);
 
+  useEffect(() => {
+    setScale(playerScale ?? 1);
+  }, [videoUrl]);
+
   const computeMirrorAtTime = (time) => {
     if (mirrorStrategy === 'forceOn') return true;
     if (mirrorStrategy === 'forceOff') return false;
-    const matchedZone = (mirrorZones || []).find(
-      (z) => z.isMirrored && time >= z.start && time <= z.end
-    );
-    return Boolean(matchedZone);
+    return (mirrorZones || []).some((z) => time >= z.start && time <= z.end);
   };
 
   // 手动切换全局镜面策略或调整区间时，也保持丝滑翻转过渡
@@ -103,8 +107,10 @@ export default function DancePlayer({
                 actualRate: segRate,
               });
 
-              if (now >= currentSeg.end || now < currentSeg.start - 0.15) {
+              if (now >= currentSeg.end) {
                 currentLoopCountRef.current += 1;
+                video.currentTime = currentSeg.start;
+              } else if (now < currentSeg.start - 0.15) {
                 video.currentTime = currentSeg.start;
               }
             }
@@ -237,12 +243,32 @@ export default function DancePlayer({
     t,
   ]);
 
+  const commitScale = (next) => {
+    setScale(next);
+    if (scaleSaveTimerRef.current) clearTimeout(scaleSaveTimerRef.current);
+    scaleSaveTimerRef.current = setTimeout(() => {
+      onScaleChange?.(next);
+    }, 400);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (scaleSaveTimerRef.current) clearTimeout(scaleSaveTimerRef.current);
+    };
+  }, []);
+
   const handleWheel = (e) => {
     e.preventDefault();
     const zoomSpeed = 0.12;
-    setScale((prev) =>
-      e.deltaY < 0 ? Math.min(prev + zoomSpeed, 4) : Math.max(prev - zoomSpeed, 0.5)
-    );
+    setScale((prev) => {
+      const next =
+        e.deltaY < 0 ? Math.min(prev + zoomSpeed, 4) : Math.max(prev - zoomSpeed, 0.5);
+      if (scaleSaveTimerRef.current) clearTimeout(scaleSaveTimerRef.current);
+      scaleSaveTimerRef.current = setTimeout(() => {
+        onScaleChange?.(next);
+      }, 400);
+      return next;
+    });
   };
 
   const togglePlay = () => {
@@ -307,12 +333,23 @@ export default function DancePlayer({
                 requestAnimationFrame(() => setSmoothMirrorTransition(true));
               }}
               onEnded={() => {
+                const video = videoRef.current;
+                if (!video) return;
+
+                // 单段 / 多段循环由状态机接回段落起点，不能被全曲循环拉回 0
+                if (segments.length > 0 && (playMode === 'single' || playMode === 'highlights')) {
+                  const currentSeg = segments[activeSegmentIndex] || segments[0];
+                  video.currentTime = currentSeg.start;
+                  video.play().catch(() => {});
+                  return;
+                }
+
                 completedSegIdsRef.current.clear();
                 lastSegIdRef.current = null;
                 currentLoopCountRef.current = 1;
-                if (loopFullTrack && videoRef.current) {
-                  videoRef.current.currentTime = 0;
-                  videoRef.current.play().catch(() => {});
+                if (loopFullTrack) {
+                  video.currentTime = 0;
+                  video.play().catch(() => {});
                 }
               }}
               className="max-h-full max-w-full cursor-pointer"
@@ -344,7 +381,7 @@ export default function DancePlayer({
             {t.zoomLabel} {Math.round(scale * 100)}%
           </span>
           <button
-            onClick={() => setScale(1)}
+            onClick={() => commitScale(1)}
             className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
           >
             {t.resetSize}
@@ -431,19 +468,16 @@ function ProgressBarFooter({
       <div className="relative flex-1 flex items-center h-6">
         <div className="absolute inset-x-0 h-2 bg-gray-800 rounded-full overflow-hidden pointer-events-none">
           {duration > 0 &&
-            (mirrorZones || []).map(
-              (z) =>
-                z.isMirrored && (
-                  <div
-                    key={z.id}
-                    style={{
-                      left: `${(z.start / duration) * 100}%`,
-                      width: `${((z.end - z.start) / duration) * 100}%`,
-                    }}
-                    className="absolute top-0 bottom-0 bg-cyan-500/40"
-                  />
-                )
-            )}
+            (mirrorZones || []).map((z) => (
+              <div
+                key={z.id}
+                style={{
+                  left: `${(z.start / duration) * 100}%`,
+                  width: `${((z.end - z.start) / duration) * 100}%`,
+                }}
+                className="absolute top-0 bottom-0 bg-cyan-500/40"
+              />
+            ))}
           {duration > 0 &&
             segments.map((seg, idx) => (
               <div

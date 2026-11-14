@@ -1,24 +1,18 @@
 import { get, set, del, keys } from 'idb-keyval';
 
 /**
- * 数据结构定义：
  * Project = {
- *   id: string,
- *   theme: 'dance' | 'edit',
- *   title: string,
- *   updatedAt: number,
- *   videos: [
- *     {
- *       id: string,
- *       name: string,
- *       file: File, // 二进制视频文件
- *       segments: Array<{ id, name, start, end, targetLoops }>,
- *       globalRate: number,
- *       loopRate: number,
- *       syncLoopRate: boolean,
- *       isMirrored: boolean
- *     }
- *   ]
+ *   id, theme: 'dance' | 'edit', title, updatedAt,
+ *   activeVideoIndex, activeFeatureTab: 'loop' | 'mirror',
+ *   videos: [{
+ *     id, name, file,
+ *     segments: [{ id, name, start, end, targetLoops, playbackRate }],
+ *     mirrorZones: [{ id, name, start, end, isMirrored }],
+ *     mirrorStrategy: 'auto' | 'forceOn' | 'forceOff',
+ *     globalRate, syncLoopRate, loopFullTrack,
+ *     playMode, highlightsMode, playerScale,
+ *     selectedSegmentIndex, selectedMirrorIndex,
+ *   }]
  * }
  */
 
