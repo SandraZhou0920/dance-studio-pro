@@ -1,16 +1,20 @@
-# React + Vite
+# Dance Studio Pro
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+本地优先的扒舞练习工作台（React + Vite）。视频与打点保存在你自己的浏览器 IndexedDB 中。
 
-Currently, two official plugins are available:
+## 在线试用
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+打开：https://sandrazhou0920.github.io/dance-studio-pro/
 
-## React Compiler
+（每人只能看到自己浏览器里缓存的项目，不会共享别人的视频。）
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 本地开发
 
-## Expanding the ESLint configuration
+```bash
+npm install
+npm run dev
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 发布
+
+推送到 `main` 后，GitHub Actions 会自动构建并发布到 GitHub Pages。
