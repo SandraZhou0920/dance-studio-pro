@@ -1,5 +1,30 @@
 import { clampIndex } from '../../utils/clampIndex';
 
+const SPEED_PRESETS = [0.8, 0.9, 1.0];
+
+function SpeedPresetButtons({ value, onSelect, disabled, activeClass, idleClass }) {
+  return (
+    <div className="flex items-center gap-1">
+      {SPEED_PRESETS.map((rate) => {
+        const active = Math.abs((value ?? 0) - rate) < 0.005;
+        return (
+          <button
+            key={rate}
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(rate)}
+            className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold cursor-pointer transition disabled:opacity-40 ${
+              active ? activeClass : idleClass
+            }`}
+          >
+            {rate.toFixed(1)}x
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function LoopControlPanel({
   t,
   currentVideo,
@@ -139,12 +164,15 @@ export default function LoopControlPanel({
             <span className="text-xs font-mono font-bold text-indigo-400 w-12 text-right">
               {currentVideo.globalRate.toFixed(2)}x
             </span>
-            <button
-              onClick={() => updateCurrentVideoConfig(() => ({ globalRate: 1.0 }))}
-              className="text-[11px] bg-gray-700 hover:bg-gray-600 px-1.5 py-0.5 rounded text-gray-300 cursor-pointer"
-            >
-              1.0x
-            </button>
+          </div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <SpeedPresetButtons
+              value={currentVideo.globalRate}
+              onSelect={(rate) => updateCurrentVideoConfig(() => ({ globalRate: rate }))}
+              activeClass="bg-indigo-600 text-white"
+              idleClass="bg-gray-700 hover:bg-gray-600 text-gray-300"
+            />
+            <span className="text-[11px] text-gray-500">{t.speedPresetsHint}</span>
           </div>
           <div className="flex items-center justify-between text-[11px] text-gray-400">
             <label className="flex items-center gap-1.5 cursor-pointer">
@@ -262,7 +290,7 @@ export default function LoopControlPanel({
                     className="flex flex-wrap items-center gap-3"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center gap-1.5 bg-gray-900 px-2.5 py-1 rounded border border-gray-700">
+                    <div className="flex flex-wrap items-center gap-1.5 bg-gray-900 px-2.5 py-1 rounded border border-gray-700">
                       <span className="text-xs text-gray-400">{t.segSpeedLabel}</span>
                       <input
                         type="range"
@@ -284,6 +312,19 @@ export default function LoopControlPanel({
                       <span className="text-xs font-mono font-bold text-rose-400 w-11 text-right">
                         {(currentVideo.syncLoopRate ? currentVideo.globalRate : segRate).toFixed(2)}x
                       </span>
+                      <SpeedPresetButtons
+                        value={currentVideo.syncLoopRate ? currentVideo.globalRate : segRate}
+                        disabled={currentVideo.syncLoopRate}
+                        onSelect={(rate) =>
+                          updateCurrentVideoConfig((v) => ({
+                            segments: v.segments.map((s) =>
+                              s.id === seg.id ? { ...s, playbackRate: rate } : s
+                            ),
+                          }))
+                        }
+                        activeClass="bg-rose-600 text-white"
+                        idleClass="bg-gray-800 hover:bg-gray-700 text-gray-300"
+                      />
                     </div>
                     <div
                       className={`flex items-center gap-1 bg-gray-900 px-2 py-1 rounded border border-gray-700 ${
