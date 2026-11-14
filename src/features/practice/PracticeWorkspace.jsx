@@ -7,6 +7,8 @@ import { createPracticeVideoEntry } from './createPracticeVideo';
 import usePracticeShortcuts from './usePracticeShortcuts';
 import LoopControlPanel from './LoopControlPanel';
 import MirrorControlPanel from './MirrorControlPanel';
+import VideoFileButton from '../../components/shared/VideoFileButton';
+import { pickVideoFiles } from '../../utils/pickVideoFiles';
 
 export default function PracticeWorkspace({
   project,
@@ -130,9 +132,12 @@ export default function PracticeWorkspace({
   };
 
   const handleAddVideos = async (e) => {
-    const files = Array.from(e.target.files || []);
+    const files = pickVideoFiles(e.target.files);
     e.target.value = '';
-    if (files.length === 0) return;
+    if (files.length === 0) {
+      window.alert(t.noVideoFilesSelected);
+      return;
+    }
     try {
       const newEntries = files.map((file, idx) => createPracticeVideoEntry(file, idx));
       const nextIndex = project.videos.length;
@@ -220,20 +225,13 @@ export default function PracticeWorkspace({
           >
             {lang === 'zh' ? 'English' : '中文'}
           </button>
-          <label
-            htmlFor="workspace-video-files"
+          <VideoFileButton
+            id="workspace-video-files"
+            onChange={handleAddVideos}
             className="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg cursor-pointer text-xs font-medium"
           >
             {t.addVideosToProject}
-            <input
-              id="workspace-video-files"
-              type="file"
-              accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.m4v,video/*"
-              multiple
-              onChange={handleAddVideos}
-              className="sr-only"
-            />
-          </label>
+          </VideoFileButton>
         </div>
       </header>
 

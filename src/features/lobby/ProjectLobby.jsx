@@ -1,4 +1,5 @@
 import { isEditorReady } from '../editor';
+import VideoFileButton from '../../components/shared/VideoFileButton';
 
 export default function ProjectLobby({
   t,
@@ -83,8 +84,9 @@ export default function ProjectLobby({
               </h3>
               <p className="text-xs text-gray-400 mt-0.5">{t.multiSelectHint}</p>
             </div>
-            <label
-              htmlFor="lobby-video-files"
+            <VideoFileButton
+              id="lobby-video-files"
+              onChange={(e) => onCreateProject(e, activeTheme)}
               className={`px-4 py-2.5 rounded-xl text-sm font-medium cursor-pointer transition ${
                 activeTheme === 'dance'
                   ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
@@ -92,15 +94,7 @@ export default function ProjectLobby({
               }`}
             >
               {activeTheme === 'dance' ? t.newDanceProject : t.newEditProject}
-              <input
-                id="lobby-video-files"
-                type="file"
-                accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.m4v,video/*"
-                multiple
-                onChange={(e) => onCreateProject(e, activeTheme)}
-                className="sr-only"
-              />
-            </label>
+            </VideoFileButton>
           </div>
 
           {displayedProjects.length === 0 ? (

@@ -9,6 +9,7 @@ import { createPracticeVideoEntry } from './features/practice/createPracticeVide
 import PracticeWorkspace from './features/practice/PracticeWorkspace';
 import ProjectLobby from './features/lobby/ProjectLobby';
 import { isEditorReady } from './features/editor';
+import { pickVideoFiles } from './utils/pickVideoFiles';
 
 export default function App() {
   const [lang, setLang] = useState(() => localStorage.getItem('studio-lang') || 'zh');
@@ -39,9 +40,12 @@ export default function App() {
   }, []);
 
   const handleCreateProject = async (e, theme) => {
-    const files = Array.from(e.target.files || []);
+    const files = pickVideoFiles(e.target.files);
     e.target.value = '';
-    if (files.length === 0) return;
+    if (files.length === 0) {
+      window.alert(t.noVideoFilesSelected);
+      return;
+    }
 
     const projectTitle =
       files.length === 1

@@ -10,13 +10,15 @@ export const translations = {
       comingSoonTag: '即将开放工作台',
       myDanceLibrary: '扒舞项目库',
       myEditLibrary: '视频剪辑项目库',
-      multiSelectHint: '新建项目时可一次性多选多个视频',
+      multiSelectHint: '新建项目时可一次性多选多个视频。若照片图库里无法点「打开」，请改从左侧 Desktop 或 Movies 选文件。',
       newDanceProject: '+ 新建扒舞项目（支持多选视频）',
       newEditProject: '+ 新建剪辑项目（支持多选视频）',
       emptyProjects: '当前主题下暂无缓存项目，点击右上角按钮创建你的第一个项目',
       deleteBtn: '删除',
       confirmDeleteProject: (title) => `确定删除项目「${title}」？本地缓存的视频将一并删除，且无法恢复。`,
       saveProjectFail: '视频未能写入本地缓存。请换 Chrome / Safari 再试；若文件很大，可能是浏览器存储空间不足。',
+      noVideoFilesSelected:
+        '没有读到可用的视频。请选 mp4 / mov；若「打开」是灰的，请点左侧 Desktop 或 Movies，不要走照片图库。',
       emptySegments:
         '当前暂无循环段落。你可以在上方波形图拖动鼠标框选，或点击「+ 在当前秒数添加循环段」。没有循环段时，四种播放模式都会按基准速度通跳。',
       emptyMirrorZones:
@@ -90,7 +92,8 @@ export const translations = {
       comingSoonTag: 'Workspace Coming Soon',
       myDanceLibrary: 'My Practice Projects',
       myEditLibrary: 'My Video Editing Projects',
-      multiSelectHint: 'Select multiple videos at once when creating a project',
+      multiSelectHint:
+        'Select multiple videos at once. If Open is disabled in Photos, pick from Desktop or Movies in the sidebar instead.',
       newDanceProject: '+ New Practice Project (Multi-video)',
       newEditProject: '+ New Editing Project (Multi-video)',
       emptyProjects: 'No cached projects under this theme yet. Click the top-right button to create one.',
@@ -99,6 +102,8 @@ export const translations = {
         `Delete project "${title}"? Cached videos will be removed and cannot be undone.`,
       saveProjectFail:
         'Could not save the video locally. Try Chrome or Safari; a very large file may exceed browser storage.',
+      noVideoFilesSelected:
+        'No usable video was read. Choose an mp4/mov file, or pick from Desktop / Movies — Open is often disabled in the Photos library.',
       emptySegments:
         'No loop segments yet. Drag on the waveform above or click "+ Add Loop Segment Here". With no segments, all play modes play the full track at base speed.',
       emptyMirrorZones:
