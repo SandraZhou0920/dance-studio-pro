@@ -3,10 +3,14 @@ import { get, set, del, keys } from 'idb-keyval';
 /**
  * Project = {
  *   id, theme: 'dance' | 'edit', title, updatedAt,
- *   activeVideoIndex, activeFeatureTab: 'loop' | 'mirror',
+ *   activeVideoIndex, activeFeatureTab: 'loop' | 'mirror' | 'eightBeat' | 'actionHits',
  *   videos: [{
  *     id, name, file,
  *     segments: [{ id, name, start, end, targetLoops, playbackRate }],
+ *     eightBeatPhrases: [{ id, name, start, end, pauseOnDownbeats }],
+ *     actionHits: [{ id, name, time, pauseOnHit }],
+ *     actionShots: [{ id, name, time, hitId, blob }],
+ *     detectedBpm,
  *     mirrorZones: [{ id, name, start, end, isMirrored }],
  *     mirrorStrategy: 'auto' | 'forceOn' | 'forceOff',
  *     globalRate, syncLoopRate, loopFullTrack,

@@ -5,9 +5,11 @@ export default function usePracticeShortcuts({
   videoRef,
   activeFeatureTab,
   activeSegmentIndex,
+  activeEightBeatIndex,
   activeMirrorIndex,
   statusInfo,
   updateCurrentVideoConfig,
+  reflowEightBeatAt,
 }) {
   useEffect(() => {
     if (!currentVideo) return;
@@ -28,6 +30,12 @@ export default function usePracticeShortcuts({
                 : z
             ),
           }));
+        } else if (activeFeatureTab === 'eightBeat') {
+          const phrase = (currentVideo.eightBeatPhrases || [])[activeEightBeatIndex];
+          if (!phrase) return;
+          reflowEightBeatAt(phrase.id, now, now >= phrase.end ? now + 3 : phrase.end);
+        } else if (activeFeatureTab === 'eightBeatTap' || activeFeatureTab === 'actionHits') {
+          return;
         } else if (activeFeatureTab !== 'mirror' && currentSeg) {
           updateCurrentVideoConfig((v) => ({
             segments: v.segments.map((s, i) =>
@@ -47,6 +55,16 @@ export default function usePracticeShortcuts({
                 : z
             ),
           }));
+        } else if (activeFeatureTab === 'eightBeat') {
+          const phrase = (currentVideo.eightBeatPhrases || [])[activeEightBeatIndex];
+          if (!phrase) return;
+          reflowEightBeatAt(
+            phrase.id,
+            now <= phrase.start ? Math.max(0, now - 3) : phrase.start,
+            now
+          );
+        } else if (activeFeatureTab === 'eightBeatTap' || activeFeatureTab === 'actionHits') {
+          return;
         } else if (activeFeatureTab !== 'mirror' && currentSeg) {
           updateCurrentVideoConfig((v) => ({
             segments: v.segments.map((s, i) =>
@@ -102,9 +120,11 @@ export default function usePracticeShortcuts({
     currentVideo,
     videoRef,
     activeSegmentIndex,
+    activeEightBeatIndex,
     activeMirrorIndex,
     activeFeatureTab,
     statusInfo.inLoop,
     updateCurrentVideoConfig,
+    reflowEightBeatAt,
   ]);
 }

@@ -4,6 +4,8 @@ import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js';
 import ZoomPlugin from 'wavesurfer.js/dist/plugins/zoom.esm.js';
 import HoverPlugin from 'wavesurfer.js/dist/plugins/hover.esm.js';
 import TimelinePlugin from 'wavesurfer.js/dist/plugins/timeline.esm.js';
+import { extractOriginalAudioPeaks } from '../../utils/originalAudio';
+import { downbeatsInPhrase } from '../../features/eightbeat/downbeats';
 
 const MIN_PX_PER_SEC = 8;
 const MAX_PX_PER_SEC = 800;
@@ -93,18 +95,29 @@ const timeToViewX = (ws, time) => {
 
 export default function FreeLoopTimeline({
   videoUrl,
+  mediaFile,           // 原片 File，用于画 1x 不循环的 BGM 波形
   videoRef,            // 与播放器共用同一时间轴，仅同步光标，不接管 <video>
-  editTarget,          // 'loop' | 'mirror' —— 决定当前时间轴操作的是循环段还是镜面区间
+  editTarget,          // 'loop' | 'mirror' | 'eightBeat' | 'eightBeatTap' | 'actionHits'
   segments,
+  eightBeatPhrases,
+  eightBeatPickIds,
+  actionHits,
+  activeActionHitId,
   mirrorZones,
   activeSegmentId,
+  activeEightBeatId,
   activeMirrorId,
   syncLoopRate,
   globalRate,
   onSelectSegment,
+  onSelectEightBeat,
   onSelectMirrorZone,
   onUpdateSegment,
+  onUpdateEightBeat,
   onUpdateMirrorZone,
+  onUpdateActionHit,
+  onSelectActionHit,
+  onSelectActionHitsInRange,
   onAddSegment,
   onAddMirrorZone,
   onPreviewFrame,      // 拖动边缘或选中时，实时让播放器画面跳到对应秒数预览
@@ -123,9 +136,14 @@ export default function FreeLoopTimeline({
   const callbacksRef = useRef({
     editTarget,
     onSelectSegment,
+    onSelectEightBeat,
     onSelectMirrorZone,
     onUpdateSegment,
+    onUpdateEightBeat,
     onUpdateMirrorZone,
+    onUpdateActionHit,
+    onSelectActionHit,
+    onSelectActionHitsInRange,
     onAddSegment,
     onAddMirrorZone,
     onPreviewFrame,
@@ -136,9 +154,14 @@ export default function FreeLoopTimeline({
     callbacksRef.current = {
       editTarget,
       onSelectSegment,
+      onSelectEightBeat,
       onSelectMirrorZone,
       onUpdateSegment,
+      onUpdateEightBeat,
       onUpdateMirrorZone,
+      onUpdateActionHit,
+      onSelectActionHit,
+      onSelectActionHitsInRange,
       onAddSegment,
       onAddMirrorZone,
       onPreviewFrame,
@@ -171,8 +194,8 @@ export default function FreeLoopTimeline({
 
       ws = WaveSurfer.create({
         container,
-        waveColor: '#9ca3af',
-        progressColor: '#818cf8',
+        waveColor: '#5eead4',
+        progressColor: '#2dd4bf',
         cursorColor: '#f43f5e',
         height: 96,
         barWidth: 2,
@@ -304,15 +327,25 @@ export default function FreeLoopTimeline({
       resizeObserver.observe(container);
 
       wsRegions.on('region-created', (newRegion) => {
-        if (newRegion.id.startsWith('seg-') || newRegion.id.startsWith('mir-')) return;
+        if (
+          newRegion.id.startsWith('seg-') ||
+          newRegion.id.startsWith('mir-') ||
+          newRegion.id.startsWith('eb-') ||
+          newRegion.id.startsWith('hit-') ||
+          newRegion.id.startsWith('act-')
+        ) {
+          return;
+        }
         const regionStart = Number(newRegion.start.toFixed(2));
         const regionEnd = Number(newRegion.end.toFixed(2));
         newRegion.remove();
 
-        if (regionEnd - regionStart > 0.25) {
+        if (callbacksRef.current.editTarget === 'actionHits' && regionEnd - regionStart > 0.04) {
+          callbacksRef.current.onSelectActionHitsInRange?.(regionStart, regionEnd);
+        } else if (regionEnd - regionStart > 0.25) {
           if (callbacksRef.current.editTarget === 'mirror') {
             callbacksRef.current.onAddMirrorZone(regionStart, regionEnd);
-          } else {
+          } else if (callbacksRef.current.editTarget === 'loop') {
             callbacksRef.current.onAddSegment(regionStart, regionEnd);
           }
           callbacksRef.current.onPreviewFrame?.(regionStart, `${regionStart.toFixed(2)}s`);
@@ -330,6 +363,14 @@ export default function FreeLoopTimeline({
             previewTime,
             `${side === 'end' ? 'End' : 'Start'} ${previewTime.toFixed(2)}s`
           );
+        } else if (region.id.startsWith('eb-')) {
+          callbacksRef.current.onUpdateEightBeat?.(region.id, { start: regionStart, end: regionEnd });
+          callbacksRef.current.onPreviewFrame?.(
+            previewTime,
+            `${side === 'end' ? 'End' : 'Start'} ${previewTime.toFixed(2)}s`
+          );
+        } else if (region.id.startsWith('act-')) {
+          callbacksRef.current.onUpdateActionHit?.(region.id, { time: regionStart });
         } else if (region.id.startsWith('mir-')) {
           callbacksRef.current.onUpdateMirrorZone(region.id, { start: regionStart, end: regionEnd });
           callbacksRef.current.onPreviewFrame?.(
@@ -343,16 +384,26 @@ export default function FreeLoopTimeline({
         e.stopPropagation();
         if (region.id.startsWith('seg-')) {
           callbacksRef.current.onSelectSegment(region.id);
+        } else if (region.id.startsWith('eb-')) {
+          callbacksRef.current.onSelectEightBeat?.(region.id, e);
+        } else if (region.id.startsWith('act-')) {
+          callbacksRef.current.onSelectActionHit?.(region.id);
         } else if (region.id.startsWith('mir-')) {
           callbacksRef.current.onSelectMirrorZone(region.id);
         }
       });
 
-      if (canDecodeVideoAsAudio()) {
-        ws.load(videoUrl).catch(() => {
-          if (cancelled) return;
-          ws.setOptions({ peaks: buildPlaceholderPeaks(), duration });
-        });
+      if (canDecodeVideoAsAudio() && mediaFile) {
+        extractOriginalAudioPeaks(mediaFile)
+          .then(({ peaks, duration: audioDuration }) => {
+            if (cancelled || !ws) return;
+            const axis = Number.isFinite(duration) && duration > 0 ? duration : audioDuration;
+            return ws.load('', peaks, axis);
+          })
+          .catch(() => {
+            if (cancelled || !ws) return;
+            ws.setOptions({ peaks: buildPlaceholderPeaks(), duration });
+          });
       }
     };
 
@@ -369,7 +420,7 @@ export default function FreeLoopTimeline({
       wsRef.current = null;
       regionsPluginRef.current = null;
     };
-  }, [videoUrl, videoRef]);
+  }, [videoUrl, videoRef, mediaFile]);
 
   // 根据当前处于「循环 Feature」还是「镜面 Feature」，渲染对应的可交互区间
   useEffect(() => {
@@ -379,7 +430,6 @@ export default function FreeLoopTimeline({
     wsRegions.clearRegions();
 
     if (editTarget === 'mirror') {
-      // 镜面设置模式下：全部渲染镜面区间，可自由选中与拖拽
       (mirrorZones || []).forEach((zone, index) => {
         const isSelected = zone.id === activeMirrorId;
         wsRegions.addRegion({
@@ -392,8 +442,58 @@ export default function FreeLoopTimeline({
           resize: true,
         });
       });
+    } else if (editTarget === 'eightBeat' || editTarget === 'eightBeatTap') {
+      const picked = new Set(eightBeatPickIds || []);
+      (eightBeatPhrases || []).forEach((phrase, index) => {
+        const isActive = phrase.id === activeEightBeatId || picked.has(phrase.id);
+        const paused = Boolean(phrase.pauseOnDownbeats);
+        wsRegions.addRegion({
+          id: phrase.id,
+          start: phrase.start,
+          end: phrase.end,
+          content: `#${index + 1} ${phrase.name}${paused ? ' ⏸' : ''}`,
+          color: paused
+            ? isActive
+              ? 'rgba(244, 63, 94, 0.5)'
+              : 'rgba(244, 63, 94, 0.22)'
+            : isActive
+              ? 'rgba(16, 185, 129, 0.45)'
+              : 'rgba(245, 158, 11, 0.22)',
+          drag: true,
+          resize: true,
+        });
+        if (paused) {
+          downbeatsInPhrase(phrase).forEach((b) => {
+            wsRegions.addRegion({
+              id: `hit-${phrase.id}-${b.beat}`,
+              start: b.time,
+              end: Math.min(phrase.end, b.time + 0.035),
+              color: 'rgba(253, 224, 71, 0.85)',
+              drag: false,
+              resize: false,
+            });
+          });
+        }
+      });
+    } else if (editTarget === 'actionHits') {
+      (actionHits || []).forEach((hit, index) => {
+        const isActive = hit.id === activeActionHitId;
+        const t0 = Number(hit.time) || 0;
+        wsRegions.addRegion({
+          id: hit.id,
+          start: t0,
+          end: t0 + 0.06,
+          content: `#${index + 1} ${hit.name}${hit.pauseOnHit ? ' ⏸' : ''}`,
+          color: hit.pauseOnHit
+            ? 'rgba(244, 63, 94, 0.55)'
+            : isActive
+              ? 'rgba(217, 70, 239, 0.55)'
+              : 'rgba(217, 70, 239, 0.28)',
+          drag: true,
+          resize: false,
+        });
+      });
     } else {
-      // 循环设置模式下：渲染所有循环段
       segments.forEach((seg, index) => {
         const isActive = seg.id === activeSegmentId;
         const displayRate = syncLoopRate ? globalRate : (seg.playbackRate ?? 0.75);
@@ -408,7 +508,7 @@ export default function FreeLoopTimeline({
         });
       });
     }
-  }, [editTarget, segments, mirrorZones, activeSegmentId, activeMirrorId, syncLoopRate, globalRate, t, timelineReady]);
+  }, [editTarget, segments, eightBeatPhrases, eightBeatPickIds, actionHits, activeActionHitId, mirrorZones, activeSegmentId, activeEightBeatId, activeMirrorId, syncLoopRate, globalRate, t, timelineReady]);
 
   const applyZoom = (nextPx) => {
     const ws = wsRef.current;
@@ -435,7 +535,15 @@ export default function FreeLoopTimeline({
     <div className="w-full bg-gray-900 p-4 rounded-xl border border-gray-800">
       <div className="flex flex-wrap justify-between items-center gap-2 text-xs text-gray-400 mb-2">
         <span>
-          {editTarget === 'mirror' ? t.timelineHintMirror : t.timelineHintLoop}
+          {editTarget === 'mirror'
+            ? t.timelineHintMirror
+            : editTarget === 'eightBeatTap'
+              ? t.timelineHintEightBeatTap
+              : editTarget === 'actionHits'
+                ? t.timelineHintActionHits
+                : editTarget === 'eightBeat'
+                  ? t.timelineHintEightBeat
+                  : t.timelineHintLoop}
         </span>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-gray-500 hidden sm:inline">{t.timelineZoomHint}</span>
@@ -461,10 +569,26 @@ export default function FreeLoopTimeline({
           >
             {t.timelineZoomFit}
           </button>
-          <span className={editTarget === 'mirror' ? 'text-cyan-400' : 'text-indigo-400'}>
+          <span
+            className={
+              editTarget === 'mirror'
+                ? 'text-cyan-400'
+                : editTarget === 'actionHits'
+                  ? 'text-fuchsia-400'
+                  : editTarget === 'eightBeatTap'
+                    ? 'text-emerald-400'
+                    : editTarget === 'eightBeat'
+                      ? 'text-amber-400'
+                      : 'text-indigo-400'
+            }
+          >
             {editTarget === 'mirror'
               ? t.timelineTotalMirror((mirrorZones || []).length)
-              : t.timelineTotalLoop(segments.length)}
+              : editTarget === 'actionHits'
+                ? t.timelineTotalActionHits((actionHits || []).length)
+                : editTarget === 'eightBeat' || editTarget === 'eightBeatTap'
+                  ? t.timelineTotalEightBeat((eightBeatPhrases || []).length)
+                  : t.timelineTotalLoop(segments.length)}
           </span>
         </div>
       </div>

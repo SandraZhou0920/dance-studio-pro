@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { findCrossedDownbeat } from '../../features/eightbeat/downbeats';
 
 export default function DancePlayer({
   videoRef,
@@ -17,6 +18,11 @@ export default function DancePlayer({
   onStatusUpdate,
   playerScale,
   onScaleChange,
+  pauseMarks,
+  onPauseMark,
+  captureClicks,
+  onCaptureClick,
+  tapBanner,
   t,
 }) {
   const [scale, setScale] = useState(playerScale ?? 1);
@@ -29,6 +35,12 @@ export default function DancePlayer({
   const completedSegIdsRef = useRef(new Set());
   const lastSegIdRef = useRef(null);
   const isSeekingRef = useRef(false);
+  const lastMediaTimeRef = useRef(0);
+  const skipPauseKeyRef = useRef('');
+  const pauseMarksRef = useRef(pauseMarks);
+  const onPauseMarkRef = useRef(onPauseMark);
+  pauseMarksRef.current = pauseMarks;
+  onPauseMarkRef.current = onPauseMark;
 
   useEffect(() => {
     currentLoopCountRef.current = 1;
@@ -101,6 +113,58 @@ export default function DancePlayer({
   }, [mirrorZones, mirrorStrategy, videoUrl]);
 
   useEffect(() => {
+    const media = videoRef.current;
+    let holdRaf = 0;
+
+    const holdTick = () => {
+      const el = videoRef.current;
+      if (el && !el.paused && !isSeekingRef.current) {
+        const now = el.currentTime || 0;
+        const marks = pauseMarksRef.current || [];
+        if (marks.length) {
+          const crossed = findCrossedDownbeat(
+            lastMediaTimeRef.current,
+            now,
+            marks,
+            skipPauseKeyRef.current
+          );
+          if (crossed) {
+            skipPauseKeyRef.current = crossed.key;
+            lastMediaTimeRef.current = crossed.time;
+            try {
+              el.currentTime = crossed.time;
+            } catch {
+              /* ignore */
+            }
+            el.pause();
+            onPauseMarkRef.current?.(crossed);
+          } else {
+            lastMediaTimeRef.current = now;
+            if (skipPauseKeyRef.current) {
+              const held = marks.find(
+                (m) => (m.key || `${m.phraseId}-${m.beat}`) === skipPauseKeyRef.current
+              );
+              if (held && now > held.time + 0.08) skipPauseKeyRef.current = '';
+            }
+          }
+        } else {
+          lastMediaTimeRef.current = now;
+        }
+      }
+      holdRaf = requestAnimationFrame(holdTick);
+    };
+
+    const onPlay = () => {
+      lastMediaTimeRef.current = videoRef.current?.currentTime || 0;
+    };
+    const onSeekedHold = () => {
+      lastMediaTimeRef.current = videoRef.current?.currentTime || 0;
+    };
+
+    media?.addEventListener('play', onPlay);
+    media?.addEventListener('seeked', onSeekedHold);
+    holdRaf = requestAnimationFrame(holdTick);
+
     let animationFrameId;
 
     const tick = () => {
@@ -120,7 +184,7 @@ export default function DancePlayer({
           return prev;
         });
 
-        if (!video.paused && !isSeekingRef.current && !video.seeking) {
+        if (!video.paused && !isSeekingRef.current) {
           const getSegRate = (seg) =>
             syncLoopRate ? globalRate : (seg.playbackRate ?? globalRate);
 
@@ -274,7 +338,12 @@ export default function DancePlayer({
     };
 
     animationFrameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animationFrameId);
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      cancelAnimationFrame(holdRaf);
+      media?.removeEventListener('play', onPlay);
+      media?.removeEventListener('seeked', onSeekedHold);
+    };
   }, [
     segments,
     mirrorZones,
@@ -286,6 +355,7 @@ export default function DancePlayer({
     globalRate,
     syncLoopRate,
     videoRef,
+    videoUrl,
     t,
   ]);
 
@@ -303,18 +373,9 @@ export default function DancePlayer({
     };
   }, []);
 
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const zoomSpeed = 0.12;
-    setScale((prev) => {
-      const next =
-        e.deltaY < 0 ? Math.min(prev + zoomSpeed, 4) : Math.max(prev - zoomSpeed, 0.5);
-      if (scaleSaveTimerRef.current) clearTimeout(scaleSaveTimerRef.current);
-      scaleSaveTimerRef.current = setTimeout(() => {
-        onScaleChange?.(next);
-      }, 400);
-      return next;
-    });
+  const nudgeScale = (delta) => {
+    const next = Math.min(4, Math.max(0.5, Number((scale + delta).toFixed(2))));
+    commitScale(next);
   };
 
   const togglePlay = () => {
@@ -323,12 +384,24 @@ export default function DancePlayer({
     v.paused ? v.play() : v.pause();
   };
 
+  const handleVideoClick = () => {
+    if (captureClicks) {
+      const time = videoRef.current?.currentTime;
+      onCaptureClick?.(Number((time || 0).toFixed(3)));
+      return;
+    }
+    togglePlay();
+  };
+
   const handleScrub = (e) => {
     const video = videoRef.current;
     if (!video) return;
     const raw = parseFloat(e.target.value);
     if (!Number.isFinite(raw)) return;
     isSeekingRef.current = true;
+    window.setTimeout(() => {
+      isSeekingRef.current = false;
+    }, 180);
     const dur = video.duration;
     const next =
       Number.isFinite(dur) && dur > 0 ? Math.min(Math.max(0, raw), Math.max(0, dur - 0.05)) : raw;
@@ -360,7 +433,6 @@ export default function DancePlayer({
       {/* 视频画面区域：控件/角标绝不能放进带 transform 的祖先里（iOS 会把整页当全屏层翻转） */}
       <div
         className="relative w-full h-[46vh] overflow-hidden flex items-center justify-center bg-black"
-        onWheel={handleWheel}
       >
         <video
           ref={videoRef}
@@ -375,7 +447,7 @@ export default function DancePlayer({
           x5-playsinline="true"
           x5-video-player-type="h5"
           x5-video-player-fullscreen="false"
-          onClick={togglePlay}
+          onClick={handleVideoClick}
           onSeeking={() => {
             isSeekingRef.current = true;
           }}
@@ -424,20 +496,48 @@ export default function DancePlayer({
         </div>
 
         {/* 顶部中央：选择或拖动段落边缘时的画面实时预览提示 */}
+        {captureClicks && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-emerald-600/95 text-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-lg pointer-events-none">
+            {tapBanner}
+          </div>
+        )}
+
         {previewLabel && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-amber-500/95 text-gray-950 px-3.5 py-1 rounded-full text-xs font-bold shadow-lg">
             {previewLabel}
           </div>
         )}
 
-        {/* 右上角：缩放状态 */}
-        <div className="absolute top-3 right-3 bg-black/75 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg flex items-center gap-3 text-xs border border-gray-700">
-          <span>
+        {/* 右上角：缩放（按键，不用滚轮） */}
+        <div
+          className="absolute top-3 right-3 bg-black/75 backdrop-blur-sm text-white px-2 py-1.5 rounded-lg flex items-center gap-1.5 text-xs border border-gray-700"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="px-1 text-gray-300">
             {t.zoomLabel} {Math.round(scale * 100)}%
           </span>
           <button
+            type="button"
+            onClick={() => nudgeScale(-0.15)}
+            disabled={scale <= 0.5}
+            className="w-7 h-7 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-white text-sm font-bold cursor-pointer"
+            aria-label={t.zoomOut}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={() => nudgeScale(0.15)}
+            disabled={scale >= 4}
+            className="w-7 h-7 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-white text-sm font-bold cursor-pointer"
+            aria-label={t.zoomIn}
+          >
+            +
+          </button>
+          <button
+            type="button"
             onClick={() => commitScale(1)}
-            className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+            className="px-2 h-7 rounded bg-gray-800 hover:bg-gray-700 text-indigo-300 cursor-pointer"
           >
             {t.resetSize}
           </button>
